@@ -1,0 +1,144 @@
+{
+    "records": [
+        {
+            "metadata": {
+                "case_id": "case_001_clean_full_payment",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the invoice amount matches the contract amount and the payment amount."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Acme Corp",
+                "entity_match": {
+                    "query": "Acme Corp",
+                    "matched_as": "Acme Corp",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "invoice_id": "INV-ACME-2026-Q1-001",
+                "invoice_amount": 120000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-01",
+                "due_date": "2026-03-31",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_002_clean_installment_first",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: this invoice is for the first installment, not the full contract amount."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Northbridge Retail",
+                "entity_match": {
+                    "query": "Northbridge Retail",
+                    "matched_as": "Northbridge Retail",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "invoice_id": "INV-NBR-2026-Q1-001",
+                "invoice_amount": 60000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-02-01",
+                "due_date": "2026-03-02",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "invoice amount follows agreed installment schedule",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_003_clean_entity_alias",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: company names are slightly different across systems, but they refer to the same company."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Greenfield Energy",
+                "entity_match": {
+                    "query": "Greenfield Energy",
+                    "matched_as": "Greenfield Energy",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "invoice_id": "INV-GFE-2026-Q1-001",
+                "invoice_amount": 85000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-05",
+                "due_date": "2026-04-04",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_004_clean_tax_deduction",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the invoice is 50000, and the lower cash payment is explained in the finance record."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "BluePeak Consulting",
+                "entity_match": {
+                    "query": "BluePeak Consulting",
+                    "matched_as": "BluePeak Consulting",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "invoice_id": "INV-BPC-2026-Q1-001",
+                "invoice_amount": 50000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-02-15",
+                "due_date": "2026-03-16",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_005_clean_usd_fx",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the invoice uses the same USD amount as the CRM contract."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Orion Analytics",
+                "entity_match": {
+                    "query": "Orion Analytics",
+                    "matched_as": "Orion Analytics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "invoice_id": "INV-ORA-2026-Q1-001",
+                "invoice_amount": 100000.0,
+                "currency": "USD",
+                "invoice_date": "2026-03-10",
+                "due_date": "2026-04-09",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        }
+    ]
+}

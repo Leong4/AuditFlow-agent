@@ -1,0 +1,154 @@
+{
+    "records": [
+        {
+            "metadata": {
+                "case_id": "case_001_clean_full_payment",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the full payment was received before the due date."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Acme Corp",
+                "entity_match": {
+                    "query": "Acme Corp",
+                    "matched_as": "Acme Corp",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "payment_id": "PAY-ACME-2026-Q1-001",
+                "payment_amount": 120000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-25",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_002_clean_installment_first",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the first installment was paid correctly."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Northbridge Retail",
+                "entity_match": {
+                    "query": "Northbridge Retail",
+                    "matched_as": "Northbridge Retail",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "payment_id": "PAY-NBR-2026-Q1-001",
+                "payment_amount": 60000.0,
+                "currency": "GBP",
+                "payment_date": "2026-02-27",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_003_clean_entity_alias",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: company names are slightly different across systems, but they refer to the same company."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Greenfield Energy Limited",
+                "entity_match": {
+                    "query": "Greenfield Energy",
+                    "matched_as": "Greenfield Energy Limited",
+                    "match_method": "alias",
+                    "confidence": 0.97
+                },
+                "payment_id": "PAY-GFE-2026-Q1-001",
+                "payment_amount": 85000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-28",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_004_clean_tax_deduction",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the cash payment is lower because 2500 was deducted as tax."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "BluePeak Consulting",
+                "entity_match": {
+                    "query": "BluePeak Consulting",
+                    "matched_as": "BluePeak Consulting",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "payment_id": "PAY-BPC-2026-Q1-001",
+                "payment_amount": 47500.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-14",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 2500.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_005_clean_usd_fx",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the USD payment matches the USD invoice."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Orion Analytics",
+                "entity_match": {
+                    "query": "Orion Analytics",
+                    "matched_as": "Orion Analytics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "payment_id": "PAY-ORA-2026-Q1-001",
+                "payment_amount": 100000.0,
+                "currency": "USD",
+                "payment_date": "2026-03-30",
+                "payment_method": "bank_transfer",
+                "exchange_rate": 0.79,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "rate at sign date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        }
+    ]
+}
