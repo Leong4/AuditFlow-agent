@@ -101,6 +101,8 @@ class CRMOutput:
 
     data_freshness: str = ""        # 数据截止日期，例如 "2026-03-31"
     error: Optional[str] = None     # 查询失败时填写错误信息
+    customer_id: str = ""
+    contract_id: str = ""
 
 
 @dataclass
@@ -127,6 +129,8 @@ class ERPOutput:
 
     data_freshness: str = ""
     error: Optional[str] = None
+    customer_id: str = ""
+    contract_id: str = ""
 
 
 @dataclass
@@ -155,6 +159,12 @@ class FinanceOutput:
 
     data_freshness: str = ""
     error: Optional[str] = None
+    customer_id: str = ""
+    contract_id: str = ""
+    invoice_id: str = ""
+    bank_fee: float = 0.0
+    original_currency_amount: Optional[float] = None
+    exchange_rate_date: str = ""
 
 
 # ─────────────────────────────────────────────
