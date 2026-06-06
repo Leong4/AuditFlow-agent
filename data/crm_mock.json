@@ -16,6 +16,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ACME-001",
+                "contract_id": "CON-ACME-2026-001",
                 "contract_amount": 120000.0,
                 "currency": "GBP",
                 "sign_date": "2026-01-15",
@@ -44,6 +46,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-NBR-001",
+                "contract_id": "CON-NBR-2026-001",
                 "contract_amount": 150000.0,
                 "currency": "GBP",
                 "sign_date": "2026-01-10",
@@ -72,6 +76,8 @@
                     "match_method": "alias",
                     "confidence": 0.98
                 },
+                "customer_id": "CUST-GFE-001",
+                "contract_id": "CON-GFE-2026-001",
                 "contract_amount": 85000.0,
                 "currency": "GBP",
                 "sign_date": "2026-01-20",
@@ -100,6 +106,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-BPC-001",
+                "contract_id": "CON-BPC-2026-001",
                 "contract_amount": 50000.0,
                 "currency": "GBP",
                 "sign_date": "2026-02-05",
@@ -128,11 +136,283 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ORA-001",
+                "contract_id": "CON-ORA-2026-001",
                 "contract_amount": 100000.0,
                 "currency": "USD",
                 "sign_date": "2026-01-25",
                 "status": "active",
                 "sales_owner": "Daniel Brooks",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "rate at sign date",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_006_clean_bank_fee",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the received cash is slightly lower because of a bank fee."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Silverline Media",
+                "entity_match": {
+                    "query": "Silverline Media",
+                    "matched_as": "Silverline Media",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-SLM-001",
+                "contract_id": "CON-SLM-2026-001",
+                "contract_amount": 50000.0,
+                "currency": "GBP",
+                "sign_date": "2026-02-10",
+                "status": "active",
+                "sales_owner": "Grace Miller",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_007_dirty_invoice_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the payment is linked to a different invoice ID."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Harbor Logistics",
+                "entity_match": {
+                    "query": "Harbor Logistics",
+                    "matched_as": "Harbor Logistics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-HBL-001",
+                "contract_id": "CON-HBL-2026-001",
+                "contract_amount": 72000.0,
+                "currency": "GBP",
+                "sign_date": "2026-01-18",
+                "status": "active",
+                "sales_owner": "Megan Scott",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_008_dirty_contract_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the contract ID is not consistent across systems."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Cedar Robotics",
+                "entity_match": {
+                    "query": "Cedar Robotics",
+                    "matched_as": "Cedar Robotics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-CDR-001",
+                "contract_id": "CON-CDR-2026-001",
+                "contract_amount": 95000.0,
+                "currency": "GBP",
+                "sign_date": "2026-01-22",
+                "status": "active",
+                "sales_owner": "Henry Adams",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_009_dirty_customer_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the customer ID is not consistent across systems."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Maple Health",
+                "entity_match": {
+                    "query": "Maple Health",
+                    "matched_as": "Maple Health",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-MPH-001",
+                "contract_id": "CON-MPH-2026-001",
+                "contract_amount": 64000.0,
+                "currency": "GBP",
+                "sign_date": "2026-02-01",
+                "status": "active",
+                "sales_owner": "Laura Bennett",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_010_dirty_missing_required_field",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: a required Finance field is missing."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Brightwave Studios",
+                "entity_match": {
+                    "query": "Brightwave Studios",
+                    "matched_as": "Brightwave Studios",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-BWS-001",
+                "contract_id": "CON-BWS-2026-001",
+                "contract_amount": 42000.0,
+                "currency": "GBP",
+                "sign_date": "2026-02-08",
+                "status": "active",
+                "sales_owner": "Nathan Green",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_011_dirty_payment_before_invoice",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the payment date is earlier than the invoice date."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Westhaven Foods",
+                "entity_match": {
+                    "query": "Westhaven Foods",
+                    "matched_as": "Westhaven Foods",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-WHF-001",
+                "contract_id": "CON-WHF-2026-001",
+                "contract_amount": 38000.0,
+                "currency": "GBP",
+                "sign_date": "2026-02-12",
+                "status": "active",
+                "sales_owner": "Ella Foster",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_012_dirty_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the Finance payment amount cannot be reconciled with the ERP invoice amount."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Lakeside Manufacturing",
+                "entity_match": {
+                    "query": "Lakeside Manufacturing",
+                    "matched_as": "Lakeside Manufacturing",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-LSM-001",
+                "contract_id": "CON-LSM-2026-001",
+                "contract_amount": 70000.0,
+                "currency": "GBP",
+                "sign_date": "2026-02-20",
+                "status": "active",
+                "sales_owner": "Thomas Reed",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_013_clean_fx_conversion",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the USD invoice is paid in GBP using the recorded exchange rate."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Atlas Software",
+                "entity_match": {
+                    "query": "Atlas Software",
+                    "matched_as": "Atlas Software",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-ATS-001",
+                "contract_id": "CON-ATS-2026-001",
+                "contract_amount": 100000.0,
+                "currency": "USD",
+                "sign_date": "2026-02-03",
+                "status": "active",
+                "sales_owner": "Rachel Morgan",
+                "payment_terms": "single payment on delivery",
+                "exchange_rate_policy": "rate at sign date",
+                "late_payment_grace_period": "15 days",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_014_dirty_fx_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the USD invoice is paid in GBP, but the converted payment amount does not match the recorded exchange rate."
+            },
+            "payload": {
+                "system": "crm",
+                "entity": "Nova Biotech",
+                "entity_match": {
+                    "query": "Nova Biotech",
+                    "matched_as": "Nova Biotech",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-NVB-001",
+                "contract_id": "CON-NVB-2026-001",
+                "contract_amount": 100000.0,
+                "currency": "USD",
+                "sign_date": "2026-02-06",
+                "status": "active",
+                "sales_owner": "Edward King",
                 "payment_terms": "single payment on delivery",
                 "exchange_rate_policy": "rate at sign date",
                 "late_payment_grace_period": "15 days",
