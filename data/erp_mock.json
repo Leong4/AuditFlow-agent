@@ -16,6 +16,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ACME-001",
+                "contract_id": "CON-ACME-2026-001",
                 "invoice_id": "INV-ACME-2026-Q1-001",
                 "invoice_amount": 120000.0,
                 "currency": "GBP",
@@ -44,6 +46,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-NBR-001",
+                "contract_id": "CON-NBR-2026-001",
                 "invoice_id": "INV-NBR-2026-Q1-001",
                 "invoice_amount": 60000.0,
                 "currency": "GBP",
@@ -72,6 +76,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-GFE-001",
+                "contract_id": "CON-GFE-2026-001",
                 "invoice_id": "INV-GFE-2026-Q1-001",
                 "invoice_amount": 85000.0,
                 "currency": "GBP",
@@ -100,6 +106,8 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-BPC-001",
+                "contract_id": "CON-BPC-2026-001",
                 "invoice_id": "INV-BPC-2026-Q1-001",
                 "invoice_amount": 50000.0,
                 "currency": "GBP",
@@ -128,11 +136,283 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ORA-001",
+                "contract_id": "CON-ORA-2026-001",
                 "invoice_id": "INV-ORA-2026-Q1-001",
                 "invoice_amount": 100000.0,
                 "currency": "USD",
                 "invoice_date": "2026-03-10",
                 "due_date": "2026-04-09",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_006_clean_bank_fee",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the invoice amount is fully reconciled after considering the bank fee."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Silverline Media",
+                "entity_match": {
+                    "query": "Silverline Media",
+                    "matched_as": "Silverline Media",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-SLM-001",
+                "contract_id": "CON-SLM-2026-001",
+                "invoice_id": "INV-SLM-2026-Q1-001",
+                "invoice_amount": 50000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-01",
+                "due_date": "2026-03-31",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_007_dirty_invoice_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: ERP invoice ID does not match the Finance invoice reference."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Harbor Logistics",
+                "entity_match": {
+                    "query": "Harbor Logistics",
+                    "matched_as": "Harbor Logistics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-HBL-001",
+                "contract_id": "CON-HBL-2026-001",
+                "invoice_id": "INV-HBL-2026-Q1-001",
+                "invoice_amount": 72000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-03",
+                "due_date": "2026-04-02",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_008_dirty_contract_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: ERP is linked to a different contract ID."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Cedar Robotics",
+                "entity_match": {
+                    "query": "Cedar Robotics",
+                    "matched_as": "Cedar Robotics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-CDR-001",
+                "contract_id": "CON-CDR-2026-999",
+                "invoice_id": "INV-CDR-2026-Q1-001",
+                "invoice_amount": 95000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-04",
+                "due_date": "2026-04-03",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_009_dirty_customer_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: ERP is linked to a different customer ID."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Maple Health",
+                "entity_match": {
+                    "query": "Maple Health",
+                    "matched_as": "Maple Health",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-MPH-999",
+                "contract_id": "CON-MPH-2026-001",
+                "invoice_id": "INV-MPH-2026-Q1-001",
+                "invoice_amount": 64000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-06",
+                "due_date": "2026-04-05",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_010_dirty_missing_required_field",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: ERP data is complete, but Finance is missing a required field."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Brightwave Studios",
+                "entity_match": {
+                    "query": "Brightwave Studios",
+                    "matched_as": "Brightwave Studios",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-BWS-001",
+                "contract_id": "CON-BWS-2026-001",
+                "invoice_id": "INV-BWS-2026-Q1-001",
+                "invoice_amount": 42000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-07",
+                "due_date": "2026-04-06",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_011_dirty_payment_before_invoice",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the invoice date is later than the Finance payment date."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Westhaven Foods",
+                "entity_match": {
+                    "query": "Westhaven Foods",
+                    "matched_as": "Westhaven Foods",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-WHF-001",
+                "contract_id": "CON-WHF-2026-001",
+                "invoice_id": "INV-WHF-2026-Q1-001",
+                "invoice_amount": 38000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-20",
+                "due_date": "2026-04-19",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_012_dirty_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: ERP invoice amount matches CRM, but Finance payment is lower without any adjustment."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Lakeside Manufacturing",
+                "entity_match": {
+                    "query": "Lakeside Manufacturing",
+                    "matched_as": "Lakeside Manufacturing",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-LSM-001",
+                "contract_id": "CON-LSM-2026-001",
+                "invoice_id": "INV-LSM-2026-Q1-001",
+                "invoice_amount": 70000.0,
+                "currency": "GBP",
+                "invoice_date": "2026-03-12",
+                "due_date": "2026-04-11",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_013_clean_fx_conversion",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the invoice is in USD and the Finance payment is converted into GBP correctly."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Atlas Software",
+                "entity_match": {
+                    "query": "Atlas Software",
+                    "matched_as": "Atlas Software",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-ATS-001",
+                "contract_id": "CON-ATS-2026-001",
+                "invoice_id": "INV-ATS-2026-Q1-001",
+                "invoice_amount": 100000.0,
+                "currency": "USD",
+                "invoice_date": "2026-03-08",
+                "due_date": "2026-04-07",
+                "delivery_status": "delivered",
+                "installment_number": 1,
+                "invoice_rules": "net 30 days from invoice_date",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_014_dirty_fx_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the invoice is in USD, but the GBP payment does not match the expected converted amount."
+            },
+            "payload": {
+                "system": "erp",
+                "entity": "Nova Biotech",
+                "entity_match": {
+                    "query": "Nova Biotech",
+                    "matched_as": "Nova Biotech",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-NVB-001",
+                "contract_id": "CON-NVB-2026-001",
+                "invoice_id": "INV-NVB-2026-Q1-001",
+                "invoice_amount": 100000.0,
+                "currency": "USD",
+                "invoice_date": "2026-03-09",
+                "due_date": "2026-04-08",
                 "delivery_status": "delivered",
                 "installment_number": 1,
                 "invoice_rules": "net 30 days from invoice_date",
