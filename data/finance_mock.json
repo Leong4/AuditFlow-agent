@@ -16,6 +16,9 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ACME-001",
+                "contract_id": "CON-ACME-2026-001",
+                "invoice_id": "INV-ACME-2026-Q1-001",
                 "payment_id": "PAY-ACME-2026-Q1-001",
                 "payment_amount": 120000.0,
                 "currency": "GBP",
@@ -24,8 +27,11 @@
                 "exchange_rate": null,
                 "refund_amount": 0.0,
                 "tax_deduction": 0.0,
+                "bank_fee": 0.0,
                 "overdue_days": 0,
                 "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
                 "data_freshness": "2026-03-31",
                 "error": null
             }
@@ -46,6 +52,9 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-NBR-001",
+                "contract_id": "CON-NBR-2026-001",
+                "invoice_id": "INV-NBR-2026-Q1-001",
                 "payment_id": "PAY-NBR-2026-Q1-001",
                 "payment_amount": 60000.0,
                 "currency": "GBP",
@@ -54,8 +63,11 @@
                 "exchange_rate": null,
                 "refund_amount": 0.0,
                 "tax_deduction": 0.0,
+                "bank_fee": 0.0,
                 "overdue_days": 0,
                 "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
                 "data_freshness": "2026-03-31",
                 "error": null
             }
@@ -76,6 +88,9 @@
                     "match_method": "alias",
                     "confidence": 0.97
                 },
+                "customer_id": "CUST-GFE-001",
+                "contract_id": "CON-GFE-2026-001",
+                "invoice_id": "INV-GFE-2026-Q1-001",
                 "payment_id": "PAY-GFE-2026-Q1-001",
                 "payment_amount": 85000.0,
                 "currency": "GBP",
@@ -84,8 +99,11 @@
                 "exchange_rate": null,
                 "refund_amount": 0.0,
                 "tax_deduction": 0.0,
+                "bank_fee": 0.0,
                 "overdue_days": 0,
                 "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
                 "data_freshness": "2026-03-31",
                 "error": null
             }
@@ -106,6 +124,9 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-BPC-001",
+                "contract_id": "CON-BPC-2026-001",
+                "invoice_id": "INV-BPC-2026-Q1-001",
                 "payment_id": "PAY-BPC-2026-Q1-001",
                 "payment_amount": 47500.0,
                 "currency": "GBP",
@@ -114,8 +135,11 @@
                 "exchange_rate": null,
                 "refund_amount": 0.0,
                 "tax_deduction": 2500.0,
+                "bank_fee": 0.0,
                 "overdue_days": 0,
                 "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
                 "data_freshness": "2026-03-31",
                 "error": null
             }
@@ -136,6 +160,9 @@
                     "match_method": "exact",
                     "confidence": 1.0
                 },
+                "customer_id": "CUST-ORA-001",
+                "contract_id": "CON-ORA-2026-001",
+                "invoice_id": "INV-ORA-2026-Q1-001",
                 "payment_id": "PAY-ORA-2026-Q1-001",
                 "payment_amount": 100000.0,
                 "currency": "USD",
@@ -144,8 +171,335 @@
                 "exchange_rate": 0.79,
                 "refund_amount": 0.0,
                 "tax_deduction": 0.0,
+                "bank_fee": 0.0,
                 "overdue_days": 0,
                 "exchange_rate_policy": "rate at sign date",
+                "original_currency_amount": 100000.0,
+                "exchange_rate_date": "2026-01-25",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_006_clean_bank_fee",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the received cash is lower only because of a bank fee."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Silverline Media",
+                "entity_match": {
+                    "query": "Silverline Media",
+                    "matched_as": "Silverline Media",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-SLM-001",
+                "contract_id": "CON-SLM-2026-001",
+                "invoice_id": "INV-SLM-2026-Q1-001",
+                "payment_id": "PAY-SLM-2026-Q1-001",
+                "payment_amount": 49850.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-27",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 150.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_007_dirty_invoice_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the payment points to a different invoice ID."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Harbor Logistics",
+                "entity_match": {
+                    "query": "Harbor Logistics",
+                    "matched_as": "Harbor Logistics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-HBL-001",
+                "contract_id": "CON-HBL-2026-001",
+                "invoice_id": "INV-HBL-2026-Q1-999",
+                "payment_id": "PAY-HBL-2026-Q1-001",
+                "payment_amount": 72000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-28",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_008_dirty_contract_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: Finance is linked to the correct invoice but the contract ID does not align with CRM."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Cedar Robotics",
+                "entity_match": {
+                    "query": "Cedar Robotics",
+                    "matched_as": "Cedar Robotics",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-CDR-001",
+                "contract_id": "CON-CDR-2026-001",
+                "invoice_id": "INV-CDR-2026-Q1-001",
+                "payment_id": "PAY-CDR-2026-Q1-001",
+                "payment_amount": 95000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-30",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_009_dirty_customer_id_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: Finance has the CRM customer ID, while ERP has a different customer ID."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Maple Health",
+                "entity_match": {
+                    "query": "Maple Health",
+                    "matched_as": "Maple Health",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-MPH-001",
+                "contract_id": "CON-MPH-2026-001",
+                "invoice_id": "INV-MPH-2026-Q1-001",
+                "payment_id": "PAY-MPH-2026-Q1-001",
+                "payment_amount": 64000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-29",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_010_dirty_missing_required_field",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: Finance payment_date is missing."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Brightwave Studios",
+                "entity_match": {
+                    "query": "Brightwave Studios",
+                    "matched_as": "Brightwave Studios",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-BWS-001",
+                "contract_id": "CON-BWS-2026-001",
+                "invoice_id": "INV-BWS-2026-Q1-001",
+                "payment_id": "PAY-BWS-2026-Q1-001",
+                "payment_amount": 42000.0,
+                "currency": "GBP",
+                "payment_date": "",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_011_dirty_payment_before_invoice",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: payment_date is earlier than invoice_date."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Westhaven Foods",
+                "entity_match": {
+                    "query": "Westhaven Foods",
+                    "matched_as": "Westhaven Foods",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-WHF-001",
+                "contract_id": "CON-WHF-2026-001",
+                "invoice_id": "INV-WHF-2026-Q1-001",
+                "payment_id": "PAY-WHF-2026-Q1-001",
+                "payment_amount": 38000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-10",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_012_dirty_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: Finance payment is lower and there is no tax, bank fee or refund adjustment."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Lakeside Manufacturing",
+                "entity_match": {
+                    "query": "Lakeside Manufacturing",
+                    "matched_as": "Lakeside Manufacturing",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-LSM-001",
+                "contract_id": "CON-LSM-2026-001",
+                "invoice_id": "INV-LSM-2026-Q1-001",
+                "payment_id": "PAY-LSM-2026-Q1-001",
+                "payment_amount": 65000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-31",
+                "payment_method": "bank_transfer",
+                "exchange_rate": null,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "GBP contract, no FX conversion",
+                "original_currency_amount": null,
+                "exchange_rate_date": "",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_013_clean_fx_conversion",
+                "time_scope": "Q1 2026",
+                "case_type": "clean",
+                "description": "Clean case: the USD invoice amount is converted into GBP correctly using the recorded exchange rate."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Atlas Software",
+                "entity_match": {
+                    "query": "Atlas Software",
+                    "matched_as": "Atlas Software",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-ATS-001",
+                "contract_id": "CON-ATS-2026-001",
+                "invoice_id": "INV-ATS-2026-Q1-001",
+                "payment_id": "PAY-ATS-2026-Q1-001",
+                "payment_amount": 79000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-29",
+                "payment_method": "bank_transfer",
+                "exchange_rate": 0.79,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "rate at sign date",
+                "original_currency_amount": 100000.0,
+                "exchange_rate_date": "2026-02-03",
+                "data_freshness": "2026-03-31",
+                "error": null
+            }
+        },
+        {
+            "metadata": {
+                "case_id": "case_014_dirty_fx_amount_mismatch",
+                "time_scope": "Q1 2026",
+                "case_type": "dirty",
+                "description": "Dirty case: the Finance GBP payment is lower than the expected converted amount."
+            },
+            "payload": {
+                "system": "finance",
+                "entity": "Nova Biotech",
+                "entity_match": {
+                    "query": "Nova Biotech",
+                    "matched_as": "Nova Biotech",
+                    "match_method": "exact",
+                    "confidence": 1.0
+                },
+                "customer_id": "CUST-NVB-001",
+                "contract_id": "CON-NVB-2026-001",
+                "invoice_id": "INV-NVB-2026-Q1-001",
+                "payment_id": "PAY-NVB-2026-Q1-001",
+                "payment_amount": 76000.0,
+                "currency": "GBP",
+                "payment_date": "2026-03-30",
+                "payment_method": "bank_transfer",
+                "exchange_rate": 0.79,
+                "refund_amount": 0.0,
+                "tax_deduction": 0.0,
+                "bank_fee": 0.0,
+                "overdue_days": 0,
+                "exchange_rate_policy": "rate at sign date",
+                "original_currency_amount": 100000.0,
+                "exchange_rate_date": "2026-02-06",
                 "data_freshness": "2026-03-31",
                 "error": null
             }

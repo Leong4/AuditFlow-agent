@@ -68,10 +68,18 @@ finance_mock.json  的 payload 对应 FinanceOutput
 
 ---
 
-## 当前 5 个测试案例
+## 当前 14 个测试案例
 
-目前这 5 个 case 都是 clean cases，也就是说它们不是故意制造的异常数据。
-但其中有些 case 不是简单的“所有金额完全一样”，而是包含一些现实业务中正常存在的情况。
+目前共有 14 个完整测试案例。
+
+其中：
+
+```text
+case_001 - case_006, case_013 = clean / suspicious-but-clean cases
+case_007 - case_012, case_014 = dirty cases
+```
+
+也就是说，有些 case 看起来像异常，但实际上可以被业务字段解释清楚，因此不应该被 Reconciliation Agent 误判成真正异常。
 
 ---
 
@@ -85,6 +93,9 @@ finance_mock.json  的 payload 对应 FinanceOutput
 合同金额 = 发票金额 = 回款金额
 币种一致
 公司名一致
+customer_id 一致
+contract_id 一致
+invoice_id 对应正确
 付款没有逾期
 ```
 
@@ -169,33 +180,224 @@ Finance 里额外记录了 exchange_rate
 ```
 
 这里的 `exchange_rate` 只是给后续汇率相关逻辑预留信息。
-目前这个 case 的重点不是制造汇率异常，而是测试系统能不能处理非 GBP 的数据。
+这个 case 的重点不是制造汇率异常，而是测试系统能不能处理非 GBP 的数据。
+
+---
+
+### case_006_clean_bank_fee
+
+这是银行手续费的 clean case。
+
+含义：
+
+```text
+ERP invoice_amount = 50000
+Finance payment_amount = 49850
+Finance bank_fee = 150
+```
+
+虽然实际到账金额比发票金额少 150，但这个差额已经记录在 `bank_fee` 里。
+
+所以这个 case 不应该被判断为金额异常。
+
+这个 case 用来测试系统能不能理解：
+
+```text
+payment_amount + bank_fee = invoice_amount
+```
+
+---
+
+### case_007_dirty_invoice_id_mismatch
+
+这是 invoice linking 的 dirty case。
+
+含义：
+
+```text
+ERP invoice_id 和 Finance invoice_id 不一致
+```
+
+即使金额、客户和合同信息看起来都能对上，付款记录指向了不同的发票 ID，这仍然应该被记录为 discrepancy。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现：
+
+```text
+erp.invoice_id != finance.invoice_id
+```
+
+---
+
+### case_008_dirty_contract_id_mismatch
+
+这是合同 ID 不一致的 dirty case。
+
+含义：
+
+```text
+CRM contract_id = 正确合同
+ERP contract_id = 另一个合同
+Finance contract_id = 正确合同
+```
+
+这种情况说明 ERP 可能关联到了错误合同。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现：
+
+```text
+CRM / ERP / Finance 的 contract_id 不一致
+```
+
+---
+
+### case_009_dirty_customer_id_mismatch
+
+这是客户 ID 不一致的 dirty case。
+
+含义：
+
+```text
+CRM customer_id = 正确客户
+ERP customer_id = 另一个客户
+Finance customer_id = 正确客户
+```
+
+即使公司名看起来一致，只要 customer_id 不一致，也可能意味着系统匹配到了错误客户。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现：
+
+```text
+CRM / ERP / Finance 的 customer_id 不一致
+```
+
+---
+
+### case_010_dirty_missing_required_field
+
+这是关键字段缺失的 dirty case。
+
+含义：
+
+```text
+Finance payment_date 缺失
+```
+
+在这个 case 里，金额、客户、合同和发票 ID 都可以对上，但 `payment_date` 是空的。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现关键字段缺失，而不是强行给出完整判断。
+
+---
+
+### case_011_dirty_payment_before_invoice
+
+这是日期异常的 dirty case。
+
+含义：
+
+```text
+Finance payment_date 早于 ERP invoice_date
+```
+
+在正常业务流程里，付款日期早于发票日期通常是不合理的，至少需要被标记出来。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现日期顺序异常。
+
+---
+
+### case_012_dirty_amount_mismatch
+
+这是金额无法对账的 dirty case。
+
+含义：
+
+```text
+ERP invoice_amount = 70000
+Finance payment_amount = 65000
+tax_deduction = 0
+bank_fee = 0
+refund_amount = 0
+```
+
+也就是说，Finance 少了 5000，而且没有任何已记录的调整字段可以解释这个差额。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现真正的金额差异。
+
+---
+
+### case_013_clean_fx_conversion
+
+这是汇率换算的 clean case。
+
+含义：
+
+```text
+CRM 使用 USD
+ERP invoice_amount = 100000 USD
+Finance payment_amount = 79000 GBP
+Finance original_currency_amount = 100000
+Finance exchange_rate = 0.79
+```
+
+虽然 ERP 和 Finance 的币种不同，但 Finance 记录里保留了原始币种金额和汇率。
+
+这个 case 用来测试系统能不能理解：
+
+```text
+original_currency_amount × exchange_rate = payment_amount
+100000 × 0.79 = 79000
+```
+
+所以这个 case 不应该被判断为 currency mismatch 或 amount mismatch。
+
+---
+
+### case_014_dirty_fx_amount_mismatch
+
+这是汇率换算金额不一致的 dirty case。
+
+含义：
+
+```text
+ERP invoice_amount = 100000 USD
+Finance original_currency_amount = 100000
+Finance exchange_rate = 0.79
+理论换算金额 = 79000 GBP
+Finance payment_amount = 76000 GBP
+```
+
+这里 Finance 的实际付款金额比理论换算金额少 3000，而且没有 tax deduction、bank fee 或 refund 可以解释。
+
+这个 case 用来测试 Reconciliation Agent 能不能发现 FX conversion 后的金额差异。
 
 ---
 
 ## 当前阶段的数据目标
 
-当前阶段的目标不是做复杂脏数据，而是先提供一组稳定的 clean data，用于测试基础流程：
+当前阶段的数据目标已经从“只提供 clean baseline”扩展为：
 
 ```text
-Router
-→ System Agents
-→ Reconciliation Agent
-→ Root-Cause Agent
+1. 提供基础 clean cases，用于测试正常流程
+2. 提供 suspicious-but-clean cases，用于避免系统误判
+3. 提供 dirty cases，用于测试 Reconciliation Agent 是否能发现明确差异
 ```
 
-后续可以再加入 dirty cases，例如：
+这些 mock data 目前主要覆盖以下场景：
 
 ```text
-金额不一致
-付款缺失
-公司名匹配失败
-付款逾期
-币种不一致
-发票日期和付款日期错位
+普通全额付款
+分期付款
+公司名 alias
+税款扣除
+银行手续费
+客户 ID 不一致
+合同 ID 不一致
+发票 ID 不一致
+关键字段缺失
+日期异常
+金额异常
+USD / GBP 汇率换算
+FX 金额不一致
 ```
-
-但这些 dirty cases 应该在基础流程跑通之后再加入，避免一开始就让调试变得过于混乱。
 
 ---
 
@@ -203,4 +405,7 @@ Router
 
 1. 不要随意修改 `payload` 字段名，因为这些字段需要和 `shared/schemas.py` 里的输出结构对接。
 2. `metadata` 可以用于测试管理，但最终 agent output 应该主要来自 `payload`。
-3. 当前 5 个 case 都是 clean cases，但 case 002 和 case 004 需要业务规则才能判断为 clean，不是简单的金额完全相等。
+3. 三个 JSON 文件里的同一个 `case_id` 是一组完整测试案例，不能只改其中一个文件。
+4. clean case 不代表所有字段都完全一样；有些 clean case 需要结合业务规则判断，例如分期付款、税款扣除、银行手续费和 FX conversion。
+5. dirty case 是故意制造的异常数据，用于测试 Reconciliation Agent 是否能发现差异。
+6. 如果后续继续扩展 schema，需要同步更新三个 mock data 文件和本说明文件。
