@@ -1,3 +1,7 @@
+# Reconciliation Agent 核心逻辑文件
+# 职责边界：只发现跨系统字段是否一致或存在差异，不负责解释差异原因。
+# 后续再由Root-Cause Agent 做原因分析和风险判断。
+
 from shared.schemas import (
     CRMOutput,
     ERPOutput,
@@ -13,6 +17,8 @@ from shared.trace import AuditTrace, TraceStep, add_step
 import re
 from datetime import date
 
+
+# 将已经确认一致的字段加入 matched 列表，方便最终输出统一管理。
 def _add_matched(matched: list[MatchedField], field: str, value, note: str = "") -> None:
     matched.append(MatchedField(
         field=field,
@@ -22,6 +28,8 @@ def _add_matched(matched: list[MatchedField], field: str, value, note: str = "")
     ))
 
 
+# 将发现的差异加入 discrepancies 列表。
+# difference 统一取绝对值，direction 用来说明是哪一边偏高、偏低或不一致。
 def _add_discrepancy(
     discrepancies: list[Discrepancy],
     field_pair: str,
@@ -36,6 +44,9 @@ def _add_discrepancy(
         direction=direction
     ))
 
+
+# 将 ISO 日期字符串转换为 date 对象。
+# 如果字段为空或格式不合法，返回 None，避免日期比较时报错。
 def _parse_date(value: str) -> date | None:
     if not value:
         return None
@@ -45,7 +56,12 @@ def _parse_date(value: str) -> date | None:
     except ValueError:
         return None
 
+# 金额比较时允许极小误差，主要用于 FX 换算后的浮点数比较。
+def _amounts_close(left: float, right: float, tolerance: float = 0.01) -> bool:
+    return abs(left - right) <= tolerance
 
+# 检查三个系统输出中是否缺少关键字段。
+# 如果关键字段缺失，Reconciliation 不应该强行判断为 clean。
 def _check_required_fields(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -56,6 +72,8 @@ def _check_required_fields(
 
     crm_required = {
         "entity": crm.entity,
+        "customer_id": crm.customer_id,
+        "contract_id": crm.contract_id,
         "contract_amount": crm.contract_amount,
         "currency": crm.currency,
         "payment_terms": crm.payment_terms,
@@ -63,6 +81,9 @@ def _check_required_fields(
 
     erp_required = {
         "entity": erp.entity,
+        "customer_id": erp.customer_id,
+        "contract_id": erp.contract_id,
+        "invoice_id": erp.invoice_id,
         "invoice_amount": erp.invoice_amount,
         "currency": erp.currency,
         "invoice_date": erp.invoice_date,
@@ -71,6 +92,9 @@ def _check_required_fields(
 
     finance_required = {
         "entity": finance.entity,
+        "customer_id": finance.customer_id,
+        "contract_id": finance.contract_id,
+        "invoice_id": finance.invoice_id,
         "payment_amount": finance.payment_amount,
         "currency": finance.currency,
         "payment_date": finance.payment_date,
@@ -100,6 +124,8 @@ def _check_required_fields(
         )
 
 
+# 检查 entity_match 的置信度。
+# 如果某个系统缺少 entity_match，或匹配置信度过低，就记录为潜在匹配问题。
 def _check_entity_match_confidence(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -139,6 +165,8 @@ def _check_entity_match_confidence(
         )
 
 
+# 检查日期相关信号，例如付款日期是否早于发票日期、是否逾期。
+# 这里仍然只记录差异，不解释具体业务原因。
 def _check_date_signals(
     erp: ERPOutput,
     finance: FinanceOutput,
@@ -173,6 +201,180 @@ def _check_date_signals(
             direction="payment_overdue"
         )
 
+# 判断当前记录是否属于 FX 换算场景。
+# 条件：ERP 与 Finance 币种不同，并且 Finance 提供了原币金额和汇率。
+def _is_fx_conversion_case(erp: ERPOutput, finance: FinanceOutput) -> bool:
+    return (
+        erp.currency != finance.currency
+        and finance.original_currency_amount is not None
+        and finance.exchange_rate is not None
+    )
+
+
+# 处理 FX 换算金额对账。
+# 如果是 FX 场景，则用 original_currency_amount 和 exchange_rate 计算应收金额。
+# 返回 True 表示 FX 逻辑已经处理完，不再继续普通同币种金额比较。
+def _compare_fx_amounts(
+    erp: ERPOutput,
+    finance: FinanceOutput,
+    matched: list[MatchedField],
+    discrepancies: list[Discrepancy]
+) -> bool:
+    """
+    Handle FX conversion cases.
+
+    Returns True if this is an FX conversion case and has been handled.
+    Returns False if normal same-currency amount comparison should continue.
+    """
+
+    if not _is_fx_conversion_case(erp, finance):
+        return False
+
+    if finance.payment_amount is None:
+        return False
+
+    expected_converted_payment = finance.original_currency_amount * finance.exchange_rate
+    adjusted_payment = (
+        finance.payment_amount
+        + finance.tax_deduction
+        + finance.bank_fee
+        - finance.refund_amount
+    )
+
+    original_amount_matches_invoice = _amounts_close(
+        finance.original_currency_amount,
+        erp.invoice_amount
+    )
+
+    converted_amount_matches_payment = _amounts_close(
+        expected_converted_payment,
+        adjusted_payment
+    )
+
+    if original_amount_matches_invoice and converted_amount_matches_payment:
+        _add_matched(
+            matched,
+            field="fx_converted_payment_amount",
+            value=adjusted_payment,
+            note="Finance payment matches ERP invoice after FX conversion using the recorded exchange rate."
+        )
+    else:
+        direction = (
+            "finance_lower"
+            if adjusted_payment < expected_converted_payment
+            else "finance_higher"
+        )
+
+        _add_discrepancy(
+            discrepancies,
+            field_pair="fx_converted_amount vs adjusted_payment_amount",
+            values={
+                "erp_invoice_amount": erp.invoice_amount,
+                "erp_currency": erp.currency,
+                "finance_currency": finance.currency,
+                "original_currency_amount": finance.original_currency_amount,
+                "exchange_rate": finance.exchange_rate,
+                "exchange_rate_date": finance.exchange_rate_date,
+                "expected_converted_payment": expected_converted_payment,
+                "finance_payment": finance.payment_amount,
+                "tax_deduction": finance.tax_deduction,
+                "bank_fee": finance.bank_fee,
+                "refund_amount": finance.refund_amount,
+                "adjusted_finance": adjusted_payment
+            },
+            difference=expected_converted_payment - adjusted_payment,
+            direction=direction
+        )
+
+    return True
+
+# 检查 customer_id 和 contract_id 是否在 CRM、ERP、Finance 三个系统中一致。
+# 这比只看公司名更可靠，可以发现客户或合同被错误匹配的情况。
+def _check_customer_and_contract_ids(
+    crm: CRMOutput,
+    erp: ERPOutput,
+    finance: FinanceOutput,
+    matched: list[MatchedField],
+    discrepancies: list[Discrepancy]
+) -> None:
+    customer_values = {
+        "crm": crm.customer_id,
+        "erp": erp.customer_id,
+        "finance": finance.customer_id,
+    }
+
+    if crm.customer_id and erp.customer_id and finance.customer_id:
+        if crm.customer_id == erp.customer_id == finance.customer_id:
+            _add_matched(
+                matched,
+                field="customer_id",
+                value=crm.customer_id,
+                note="Customer ID is consistent across CRM, ERP and Finance."
+            )
+        else:
+            _add_discrepancy(
+                discrepancies,
+                field_pair="customer_id across systems",
+                values=customer_values,
+                difference=0.0,
+                direction="customer_id_mismatch"
+            )
+
+    contract_values = {
+        "crm": crm.contract_id,
+        "erp": erp.contract_id,
+        "finance": finance.contract_id,
+    }
+
+    if crm.contract_id and erp.contract_id and finance.contract_id:
+        if crm.contract_id == erp.contract_id == finance.contract_id:
+            _add_matched(
+                matched,
+                field="contract_id",
+                value=crm.contract_id,
+                note="Contract ID is consistent across CRM, ERP and Finance."
+            )
+        else:
+            _add_discrepancy(
+                discrepancies,
+                field_pair="contract_id across systems",
+                values=contract_values,
+                difference=0.0,
+                direction="contract_id_mismatch"
+            )
+
+
+# 检查 ERP 发票 ID 与 Finance 付款记录中的 invoice_id 是否一致。
+# 即使金额一致，如果 invoice_id 不一致，也说明付款可能关联到了错误发票。
+def _check_invoice_linking(
+    erp: ERPOutput,
+    finance: FinanceOutput,
+    matched: list[MatchedField],
+    discrepancies: list[Discrepancy]
+) -> None:
+    if erp.invoice_id and finance.invoice_id:
+        if erp.invoice_id == finance.invoice_id:
+            _add_matched(
+                matched,
+                field="invoice_id",
+                value=erp.invoice_id,
+                note="Finance payment is linked to the same ERP invoice ID."
+            )
+        else:
+            _add_discrepancy(
+                discrepancies,
+                field_pair="erp_invoice_id vs finance_invoice_id",
+                values={
+                    "erp": erp.invoice_id,
+                    "finance": finance.invoice_id
+                },
+                difference=0.0,
+                direction="invoice_id_mismatch"
+            )
+
+
+# 比较三个系统的币种。
+# 如果 CRM/ERP 使用原始发票币种，而 Finance 使用换算后的付款币种，则交给 FX 逻辑处理。
 def _compare_currency(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -193,6 +395,18 @@ def _compare_currency(
             value=crm.currency,
             note="Currency is consistent across CRM, ERP and Finance."
         )
+    elif crm.currency == erp.currency and _is_fx_conversion_case(erp, finance):
+        _add_matched(
+            matched,
+            field="currency_fx_conversion",
+            value={
+                "source_currency": erp.currency,
+                "payment_currency": finance.currency,
+                "exchange_rate": finance.exchange_rate,
+                "exchange_rate_date": finance.exchange_rate_date
+            },
+            note="CRM and ERP use the invoice currency, while Finance uses a converted payment currency."
+        )
     else:
         _add_discrepancy(
             discrepancies,
@@ -203,6 +417,8 @@ def _compare_currency(
         )
 
 
+# 比较合同金额、发票金额和财务回款金额。
+# 这里包含分期付款、税款扣除、银行手续费、退款和 FX 换算等基础规则。
 def _compare_amounts(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -218,7 +434,7 @@ def _compare_amounts(
       compare ERP invoice_amount with the expected installment amount.
     - Otherwise, compare CRM contract_amount directly with ERP invoice_amount.
     - Then compare ERP invoice_amount with Finance adjusted payment:
-      payment_amount + tax_deduction - refund_amount.
+      payment_amount + tax_deduction + bank_fee - refund_amount.
     """
 
     if crm.contract_amount is not None and erp.invoice_amount is not None:
@@ -277,14 +493,22 @@ def _compare_amounts(
             )
 
     if erp.invoice_amount is not None and finance.payment_amount is not None:
-        adjusted_payment = finance.payment_amount + finance.tax_deduction - finance.refund_amount
+        if _compare_fx_amounts(erp, finance, matched, discrepancies):
+            return
+        
+        adjusted_payment = (
+            finance.payment_amount
+            + finance.tax_deduction
+            + finance.bank_fee
+            - finance.refund_amount
+        )
 
         if adjusted_payment == erp.invoice_amount:
             _add_matched(
                 matched,
                 field="invoice_amount vs adjusted_payment_amount",
                 value=adjusted_payment,
-                note="Finance payment matches ERP invoice after tax deduction and refund adjustment."
+                note="Finance payment matches ERP invoice after tax deduction, bank fee and refund adjustment."
             )
         else:
             direction = "finance_lower" if adjusted_payment < erp.invoice_amount else "finance_higher"
@@ -295,6 +519,7 @@ def _compare_amounts(
                     "erp": erp.invoice_amount,
                     "finance_payment": finance.payment_amount,
                     "tax_deduction": finance.tax_deduction,
+                    "bank_fee": finance.bank_fee,
                     "refund_amount": finance.refund_amount,
                     "adjusted_finance": adjusted_payment
                 },
@@ -303,6 +528,7 @@ def _compare_amounts(
             )
 
 
+# 构造实体一致性摘要，用于记录三个系统中的实体名称和最终对齐名称。
 def _build_entity_consistency(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -317,6 +543,8 @@ def _build_entity_consistency(
     )
 
 
+# Reconciliation Agent 的主入口函数。
+# 输入三个系统的结构化输出，返回 ReconciliationOutput。
 def reconcile(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -340,6 +568,8 @@ def reconcile(
         _check_required_fields(crm, erp, finance, discrepancies)
         _check_entity_match_confidence(crm, erp, finance, discrepancies)
         _check_date_signals(erp, finance, discrepancies)
+        _check_customer_and_contract_ids(crm, erp, finance, matched, discrepancies)
+        _check_invoice_linking(erp, finance, matched, discrepancies)
         _compare_currency(crm, erp, finance, matched, discrepancies)
         _compare_amounts(crm, erp, finance, matched, discrepancies)
 
@@ -352,21 +582,23 @@ def reconcile(
         )
 
         if trace is not None:
-                discrepancy_count = len(discrepancies)
+            discrepancy_count = len(discrepancies)
 
-        if discrepancy_count == 0:
-            decision = "Compared CRM, ERP and Finance outputs and found no discrepancies."
-        else:
-            decision = f"Compared CRM, ERP and Finance outputs and found {discrepancy_count} discrepancy/discrepancies."
-
-        add_step(trace, TraceStep(
-            agent="reconciliation",
-            layer="analysis",
-            decision=decision,
-            reason="Used rule-based checks for required fields, entity match confidence, date signals, currency consistency, installment amount, and adjusted payment amount.",
-            confidence=0.9,
-            discrepancies_found=discrepancy_count
-        ))
+            if discrepancy_count == 0:
+                decision = "Compared CRM, ERP and Finance outputs and found no discrepancies."
+            elif discrepancy_count == 1:
+                decision = "Compared CRM, ERP and Finance outputs and found 1 discrepancy."
+            else:
+                decision = f"Compared CRM, ERP and Finance outputs and found {discrepancy_count} discrepancies."
+    
+            add_step(trace, TraceStep(
+                agent="reconciliation",
+                layer="analysis",
+                decision=decision,
+                reason="Used rule-based checks for required fields, entity match confidence, customer/contract IDs, invoice linking, date signals, currency consistency, installment amount, adjusted payment amount, bank fee, tax deduction, refund adjustment, and FX conversion.",
+                confidence=0.9,
+                discrepancies_found=discrepancy_count
+            ))
 
         return output
 
@@ -384,13 +616,20 @@ def reconcile(
             entity=crm.entity if crm.entity else "",
             error=str(e)
         )
-    
+
+
+# 从 payment_terms 文本中提取百分比，用于分期付款金额计算。
 def _extract_installment_percentages(payment_terms: str) -> list[float]:
     matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", payment_terms)
     return [float(value) / 100 for value in matches]
 
 
-def _expected_installment_amount(contract_amount: float, payment_terms: str, installment_number: int | None) -> float | None:
+# 根据合同总金额、付款条款和当前期数，计算当前期理论应开票金额。
+def _expected_installment_amount(
+    contract_amount: float,
+    payment_terms: str,
+    installment_number: int | None
+) -> float | None:
     if installment_number is None:
         return None
 
