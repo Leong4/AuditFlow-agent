@@ -52,15 +52,9 @@ stop_agent() {
   rm -f "$pid_file"
 }
 
-stop_agent "crm"
-stop_agent "erp"
+stop_agent "router"
+stop_agent "rootcause"
+stop_agent "reconciliation"
 stop_agent "finance"
-
-# TODO: Add router agent shutdown here when available.
-# stop_agent "router"
-
-# TODO: Add reconciliation agent shutdown here when available.
-# stop_agent "reconciliation"
-
-# TODO: Add root-cause agent shutdown here when available.
-# stop_agent "rootcause"
+stop_agent "erp"
+stop_agent "crm"
