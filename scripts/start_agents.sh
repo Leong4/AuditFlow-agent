@@ -50,12 +50,6 @@ start_agent() {
 start_agent "crm" "agents/system/crm_agent.py"
 start_agent "erp" "agents/system/erp_agent.py"
 start_agent "finance" "agents/system/finance_agent.py"
-
-# TODO: Add router agent startup here when available.
-# start_agent "router" "agents/system/router_agent.py"
-
-# TODO: Add reconciliation agent startup here when available.
-# start_agent "reconciliation" "agents/system/reconciliation_agent.py"
-
-# TODO: Add root-cause agent startup here when available.
-# start_agent "rootcause" "agents/system/rootcause_agent.py"
+start_agent "reconciliation" "agents/reconciliation/agent.py"
+start_agent "rootcause" "agents/rootcause/agent.py"
+start_agent "router" "agents/router/agent.py"

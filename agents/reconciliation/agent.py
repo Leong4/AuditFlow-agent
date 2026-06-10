@@ -2,7 +2,33 @@
 # 职责边界：只发现跨系统字段是否一致或存在差异，不负责解释差异原因。
 # 后续再由Root-Cause Agent 做原因分析和风险判断。
 
-from shared.schemas import (
+from __future__ import annotations
+
+import ast
+import asyncio
+import json
+import logging
+import os
+import re
+import sys
+from dataclasses import asdict, fields, is_dataclass
+from datetime import date
+from enum import Enum
+from pathlib import Path
+from typing import Any, TypeVar
+
+from dotenv import load_dotenv
+from pydantic_ai import RunContext
+from thenvoi import Agent
+from thenvoi.core.protocols import AgentToolsProtocol
+from thenvoi.core.types import PlatformMessage
+
+# ── 路径设置 ──────────────────────────────────────────────
+# 让 Python 能找到 shared/ 目录
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT))
+
+from shared.schemas import (  # noqa: E402
     CRMOutput,
     ERPOutput,
     FinanceOutput,
@@ -10,12 +36,341 @@ from shared.schemas import (
     Discrepancy,
     MatchedField,
     EntityConsistency,
+    EntityMatch,
+    MatchMethod,
 )
 
-from shared.trace import AuditTrace, TraceStep, add_step
+from shared.trace import AuditTrace, TraceStep, add_step  # noqa: E402
+from shared.thenvoi_pydantic_compat import PydanticAIAdapter  # noqa: E402
 
-import re
-from datetime import date
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+TSystemOutput = TypeVar("TSystemOutput", CRMOutput, ERPOutput, FinanceOutput)
+
+
+# ── Reconciliation Agent Prompt ───────────────────────────
+
+RECONCILIATION_SYSTEM_PROMPT = """
+You are the Reconciliation Agent in the AuditFlow multi-agent reconciliation system.
+
+YOUR ROLE:
+- You receive raw structured responses from AuditFlow CRM, AuditFlow ERP, and AuditFlow Finance.
+- You reconstruct CRMOutput, ERPOutput, and FinanceOutput objects from those responses.
+- You call the run_reconciliation tool to compare the three systems.
+- You report only matched fields and discrepancies. You do NOT explain root causes.
+
+IMPORTANT RULES:
+1. Only respond if the message contains structured data from CRM, ERP, and Finance agents.
+2. If the message is a thank-you, acknowledgment, greeting, or any non-data message, do not reply at all.
+3. After running reconciliation, send the results as a structured JSON message mentioning AuditFlow RootCause.
+
+## HOW TO RESPOND
+- Call `run_reconciliation` with the raw text sections from each system agent as crm_data, erp_data, finance_data.
+- Then send the result using `reply_to_rootcause`, passing the JSON output from run_reconciliation as content.
+- NEVER use thenvoi_send_message. NEVER specify @mentions yourself.
+- Your reply content must be a JSON object in this shape:
+  {"message_type": "reconciliation_output", "reconciliation": <run_reconciliation result>}
+
+## ENTITY EXTRACTION RULE
+When reading System Agent responses, always extract the entity name from:
+  entity_match["matched_as"]
+The entity_consistency values must be the actual company name (e.g. "Acme Corp").
+NEVER use the JSON key name ("crm", "erp", "finance") as the entity value.
+NEVER use any field other than matched_as for the entity name.
+
+Correct example:
+  {"crm": "Acme Corp", "erp": "Acme Corp", "finance": "Acme Corp", "aligned_name": "Acme Corp", ...}
+
+Wrong example (do not produce this):
+  {"crm": "Acme Corp", "erp": "crm", "finance": "Acme Corp", ...}
+"""
+
+
+# ── Band 输入解析工具 ─────────────────────────────────────
+
+def _json_safe(obj: Any) -> Any:
+    if is_dataclass(obj):
+        return _json_safe(asdict(obj))
+
+    if isinstance(obj, Enum):
+        return obj.value
+
+    if isinstance(obj, list):
+        return [_json_safe(item) for item in obj]
+
+    if isinstance(obj, dict):
+        return {key: _json_safe(value) for key, value in obj.items()}
+
+    return obj
+
+
+def _iter_balanced_object_strings(text: str) -> list[str]:
+    objects: list[str] = []
+
+    for start, char in enumerate(text):
+        if char != "{":
+            continue
+
+        depth = 0
+        quote: str | None = None
+        escaped = False
+
+        for index in range(start, len(text)):
+            current = text[index]
+
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == quote:
+                    quote = None
+                continue
+
+            if current in ("'", '"'):
+                quote = current
+            elif current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    objects.append(text[start:index + 1])
+                    break
+
+    return objects
+
+
+def _extract_dict_from_text(raw_text: str) -> dict[str, Any]:
+    text = raw_text.strip()
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+
+        try:
+            parsed, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+
+        if isinstance(parsed, dict):
+            return parsed
+
+    for candidate in _iter_balanced_object_strings(text):
+        try:
+            parsed = ast.literal_eval(candidate)
+        except (SyntaxError, ValueError):
+            continue
+
+        if isinstance(parsed, dict):
+            return parsed
+
+    raise ValueError("Could not find a structured JSON-like object in agent response.")
+
+
+def _looks_like_system_payload(payload: dict[str, Any], system: str) -> bool:
+    system_value = str(payload.get("system", "")).lower()
+    if system_value == system:
+        return True
+
+    required_signal = {
+        "crm": "contract_amount",
+        "erp": "invoice_amount",
+        "finance": "payment_amount",
+    }[system]
+
+    return required_signal in payload
+
+
+def _find_system_payload(payload: Any, system: str) -> dict[str, Any] | None:
+    if isinstance(payload, dict):
+        nested = payload.get(system)
+        if isinstance(nested, dict):
+            return nested
+
+        if _looks_like_system_payload(payload, system):
+            return payload
+
+        for value in payload.values():
+            found = _find_system_payload(value, system)
+            if found is not None:
+                return found
+
+    if isinstance(payload, list):
+        for value in payload:
+            found = _find_system_payload(value, system)
+            if found is not None:
+                return found
+
+    return None
+
+
+def _parse_match_method(value: Any) -> MatchMethod:
+    if isinstance(value, MatchMethod):
+        return value
+
+    text = str(value).strip()
+
+    quoted = re.search(r"'([^']+)'", text)
+    if quoted:
+        text = quoted.group(1)
+    elif "." in text:
+        text = text.rsplit(".", 1)[-1].lower()
+
+    return MatchMethod(text.lower())
+
+
+def _parse_entity_match(value: Any) -> EntityMatch | None:
+    if value in (None, "", "None"):
+        return None
+
+    if isinstance(value, EntityMatch):
+        return value
+
+    if isinstance(value, dict):
+        return EntityMatch(
+            query=value.get("query", ""),
+            matched_as=value.get("matched_as", ""),
+            match_method=_parse_match_method(value.get("match_method", MatchMethod.EXACT)),
+            confidence=float(value.get("confidence", 0.0)),
+        )
+
+    text = str(value)
+
+    def quoted_field(name: str) -> str:
+        match = re.search(rf"{name}=(['\"])(.*?)\1", text)
+        return match.group(2) if match else ""
+
+    method_match = re.search(r"match_method=([^,)]*)", text)
+    confidence_match = re.search(r"confidence=([0-9.]+)", text)
+
+    return EntityMatch(
+        query=quoted_field("query"),
+        matched_as=quoted_field("matched_as"),
+        match_method=_parse_match_method(
+            method_match.group(1) if method_match else MatchMethod.EXACT
+        ),
+        confidence=float(confidence_match.group(1)) if confidence_match else 0.0,
+    )
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+
+    return float(value)
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+
+    return int(value)
+
+
+def _build_system_output(
+    payload: dict[str, Any],
+    output_type: type[TSystemOutput],
+    system: str,
+) -> TSystemOutput:
+    allowed_fields = {field.name for field in fields(output_type)}
+    data = {
+        key: value
+        for key, value in payload.items()
+        if key in allowed_fields
+    }
+
+    data.setdefault("system", system)
+
+    if "entity_match" in data:
+        data["entity_match"] = _parse_entity_match(data["entity_match"])
+
+    for field_name in (
+        "contract_amount",
+        "invoice_amount",
+        "payment_amount",
+        "exchange_rate",
+        "refund_amount",
+        "tax_deduction",
+        "bank_fee",
+        "original_currency_amount",
+    ):
+        if field_name in data:
+            data[field_name] = _coerce_float(data[field_name])
+
+    for field_name in ("installment_number", "overdue_days"):
+        if field_name in data:
+            data[field_name] = _coerce_int(data[field_name])
+
+    return output_type(**data)
+
+
+def _parse_system_output(
+    raw_text: str,
+    output_type: type[TSystemOutput],
+    system: str,
+) -> TSystemOutput:
+    parsed = _extract_dict_from_text(raw_text)
+    payload = _find_system_payload(parsed, system)
+
+    if payload is None:
+        raise ValueError(f"Could not find {system.upper()} structured data in response.")
+
+    return _build_system_output(payload, output_type, system)
+
+
+# ── Tool 定义 ─────────────────────────────────────────────
+
+async def run_reconciliation(
+    ctx: RunContext[AgentToolsProtocol],
+    crm_data: str,
+    erp_data: str,
+    finance_data: str,
+) -> str:
+    """
+    Run reconciliation on data from CRM, ERP, and Finance agents.
+    Call this when you have received responses from all three system agents.
+    crm_data: raw text response from AuditFlow CRM
+    erp_data: raw text response from AuditFlow ERP
+    finance_data: raw text response from AuditFlow Finance
+    """
+    _ = ctx
+
+    logger.info(f"run_reconciliation called")
+    logger.info(f"crm_data[:200]: {crm_data[:200]!r}")
+    logger.info(f"erp_data[:200]: {erp_data[:200]!r}")
+    logger.info(f"finance_data[:200]: {finance_data[:200]!r}")
+
+    crm = _parse_system_output(crm_data, CRMOutput, "crm")
+    erp = _parse_system_output(erp_data, ERPOutput, "erp")
+    finance = _parse_system_output(finance_data, FinanceOutput, "finance")
+    logger.info(f"Parsed: crm.entity={crm.entity!r}, erp.entity={erp.entity!r}, finance.entity={finance.entity!r}")
+
+    output = reconcile(crm, erp, finance)
+    return json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+
+
+async def reply_to_rootcause(
+    ctx: RunContext[AgentToolsProtocol],
+    content: str,
+) -> str:
+    """
+    Send reconciliation results to AuditFlow RootCause for root cause analysis.
+    Always use this tool to send your output. Do NOT use thenvoi_send_message.
+    Pass the JSON result content only; the recipient is fixed.
+    """
+    await ctx.deps.get_participants()
+    await ctx.deps.send_message(content=content, mentions=["AuditFlow RootCause"])
+    return "Sent to AuditFlow RootCause"
 
 
 # 将已经确认一致的字段加入 matched 列表，方便最终输出统一管理。
@@ -534,11 +889,16 @@ def _build_entity_consistency(
     erp: ERPOutput,
     finance: FinanceOutput
 ) -> EntityConsistency:
+    crm_entity = crm.entity_match.matched_as if crm.entity_match else crm.entity
+    erp_entity = erp.entity_match.matched_as if erp.entity_match else erp.entity
+    finance_entity = finance.entity_match.matched_as if finance.entity_match else finance.entity
+    aligned_name = crm_entity or erp_entity or finance_entity
+
     return EntityConsistency(
-        crm=crm.entity,
-        erp=erp.entity,
-        finance=finance.entity,
-        aligned_name=crm.entity_match.query if crm.entity_match else crm.entity,
+        crm=crm_entity,
+        erp=erp_entity,
+        finance=finance_entity,
+        aligned_name=aligned_name,
         alignment_method="based on system-provided entity_match fields"
     )
 
@@ -644,3 +1004,69 @@ def _expected_installment_amount(
         return None
 
     return contract_amount * percentages[index]
+
+
+# ── Agent 启动 ────────────────────────────────────────────
+
+class ReconOnlyAdapter(PydanticAIAdapter):
+    def _create_agent(self):
+        agent = super()._create_agent()
+        agent._function_toolset.tools.pop("thenvoi_send_message", None)
+        return agent
+
+    async def on_message(
+        self,
+        msg: PlatformMessage,
+        tools: AgentToolsProtocol,
+        history,
+        participants_msg: str | None,
+        contacts_msg: str | None,
+        *,
+        is_session_bootstrap: bool,
+        room_id: str,
+    ) -> None:
+        if msg.sender_name != "AuditFlow Router":
+            logger.info(
+                f"Ignoring message from {msg.sender_name!r} "
+                f"(sender_type={msg.sender_type!r}) - not from Router"
+            )
+            return
+        await super().on_message(
+            msg,
+            tools,
+            history,
+            participants_msg,
+            contacts_msg,
+            is_session_bootstrap=is_session_bootstrap,
+            room_id=room_id,
+        )
+
+
+async def main() -> None:
+    agent_id = os.getenv("RECONCILIATION_AGENT_ID")
+    api_key = os.getenv("RECONCILIATION_API_KEY")
+
+    if not agent_id or not api_key:
+        raise ValueError(
+            "RECONCILIATION_AGENT_ID and RECONCILIATION_API_KEY must be set in .env\n"
+            "These are the credentials from the Band platform for the AuditFlow Reconciliation agent."
+        )
+
+    adapter = ReconOnlyAdapter(
+        model="openai:gpt-4o-mini",
+        custom_section=RECONCILIATION_SYSTEM_PROMPT,
+        additional_tools=[run_reconciliation, reply_to_rootcause],
+    )
+
+    agent = Agent.create(
+        adapter=adapter,
+        agent_id=agent_id,
+        api_key=api_key,
+    )
+
+    logger.info("Reconciliation Agent starting - listening for messages in Band room...")
+    await agent.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

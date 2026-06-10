@@ -18,13 +18,16 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic_ai import RunContext
 from thenvoi import Agent
 from thenvoi.core.protocols import AgentToolsProtocol
+from thenvoi.core.types import PlatformMessage
 
 # ── 路径设置 ──────────────────────────────────────────────
 # 让 Python 能找到 shared/ 目录
@@ -37,6 +40,26 @@ from shared.thenvoi_pydantic_compat import PydanticAIAdapter  # noqa: E402
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_processed_message_ids: set[str] = set()
+_active_message_ids_by_room: dict[str, str] = {}
+_query_context_by_message_id: dict[str, tuple[str, str]] = {}
+_replied_message_ids: set[str] = set()
+
+
+def _extract_router_query_context(content: str) -> tuple[str, str] | None:
+    entity_match = re.search(r"(?im)^Entity:\s*(.+)$", content)
+    time_scope_match = re.search(r"(?im)^Time scope:\s*(.+)$", content)
+    if entity_match and time_scope_match:
+        return entity_match.group(1).strip(), time_scope_match.group(1).strip()
+
+    legacy_match = re.search(
+        r"(?is)\bQuery\s+.+?\s+for\s+(.+?),\s*(.+)$",
+        content.strip(),
+    )
+    if legacy_match:
+        return legacy_match.group(1).strip(), legacy_match.group(2).strip()
+
+    return None
 
 # ── Mock 数据加载 ─────────────────────────────────────────
 DATA_PATH = ROOT / "data" / "finance_mock.json"
@@ -126,28 +149,75 @@ def build_finance_output(entity: str, time_scope: str) -> FinanceOutput:
     )
 
 
+async def query_and_reply_finance(
+    ctx: RunContext[AgentToolsProtocol],
+    entity: str,
+    time_scope: str,
+) -> str:
+    """
+    Query the Finance database and send the raw JSON result back to whoever asked.
+    Call this when you receive a data query for Finance. Pass entity and time_scope exactly as stated.
+    The JSON response is sent automatically — do NOT call reply_with_data or thenvoi_send_message.
+    """
+    reply_target = getattr(ctx.deps, "reply_target", None)
+    if not reply_target:
+        return "Error: no reply target set."
+
+    message_id = getattr(ctx.deps, "current_message_id", None)
+    if not message_id:
+        message_id = _active_message_ids_by_room.get(getattr(ctx.deps, "room_id", ""))
+
+    query_context = _query_context_by_message_id.get(message_id or "")
+    if query_context is not None:
+        entity, time_scope = query_context
+
+    dedupe_key = message_id or f"{getattr(ctx.deps, 'room_id', 'unknown')}:{reply_target}"
+    already_replied = dedupe_key in _replied_message_ids
+    logger.info(f"[finance] query_and_reply called — already_replied={already_replied}")
+    if already_replied:
+        logger.info("Already replied for this query — ignoring duplicate tool call.")
+        return "Already replied for this query."
+    _replied_message_ids.add(dedupe_key)
+    ctx.deps.already_replied = True
+
+    result = build_finance_output(entity, time_scope)
+    def _enum_safe(obj):
+        from enum import Enum
+        if isinstance(obj, Enum):
+            return obj.value
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+    json_str = json.dumps(asdict(result), default=_enum_safe, ensure_ascii=False, indent=2)
+    await ctx.deps.get_participants()
+    await ctx.deps.send_message(content=json_str, mentions=[reply_target])
+    return f"Replied with Finance JSON to {reply_target}"
+
+
 # ── Finance Agent Prompt ─────────────────────────────────
 
 FINANCE_SYSTEM_PROMPT = """
-You are the Finance Agent in the AuditFlow multi-agent reconciliation system.
+You are the Finance Agent in the AuditFlow multi-agent reconciliation system. You have access to the Finance database containing payment data, payment methods, exchange rates, and customer information. Always respond in English.
 
-YOUR ROLE:
-- You have access to the Finance database containing payment records, payment methods, exchange-rate details, deductions, refunds, overdue data, and Finance business rules.
-- When asked about a specific entity and time scope, you query the Finance database and report the facts.
-- You report payment records and Finance business rules only. You do NOT make cross-system judgments.
+## WHEN TO RESPOND
+You only handle data-query tasks. A valid query identifies an entity (company/customer) and a time scope. The incoming message is shown to you as "[SenderName]: ...".
+- If the message is a data query (it names an entity and a time scope, or clearly asks for Finance data), handle it.
+- If the message is NOT a data query (a greeting, a thank-you, an acknowledgment, another agent's data, or any chit-chat), do NOTHING: do not call any tool, do not reply, output nothing.
 
-HOW TO RESPOND:
-When you receive a query, use the query_finance tool to look up the data, then respond with:
-1. The payment ID, payment amount, and currency
-2. Payment date and payment method
-3. Exchange rate, refund amount, tax deduction, and overdue days
-4. Finance business rules
-5. Any entity name matching details
-6. Data freshness date
-7. If no record is found, clearly state that
+## HOW TO HANDLE A QUERY
+Call the `query_and_reply_finance` tool with the entity and time_scope. That's all — the tool queries the database, formats the JSON, and sends the reply automatically. Do NOT call any other tool to reply.
 
-Keep responses concise and structured. Always include the raw numbers.
-You are like a witness on the stand — report only what you saw in the Finance system.
+## CRITICAL
+- NEVER use thenvoi_send_message.
+- NEVER call reply_with_data.
+- NEVER format or rewrite the data yourself.
+- One tool call: query_and_reply_finance. Nothing else.
+
+## YOUR ROLE BOUNDARY (CRITICAL)
+Report ONLY what the Finance system contains. Do NOT make cross-system judgments.
+- The incoming query may list multiple systems, e.g. "Query crm, erp, finance for Acme Corp". This is a broadcast sent to several agents at once. You must IGNORE the other systems entirely.
+- You ONLY look up and report data from YOUR system (Finance). You ALWAYS call query_and_reply_finance, even if the query mentions crm or erp.
+- NEVER comment on, report for, or say "no data found" about CRM, ERP, or any system other than your own. Those are other agents' jobs, not yours.
+- You are like a witness on the stand — testify ONLY about what you saw in the Finance system. Keep responses concise and structured, and always include the raw numbers.
 """
 
 
@@ -174,6 +244,54 @@ def query_finance(
 
 # ── Agent 启动 ────────────────────────────────────────────
 
+class TaskOnlyAdapter(PydanticAIAdapter):
+    def _create_agent(self):
+        agent = super()._create_agent()
+        agent._function_toolset.tools.pop("thenvoi_send_message", None)
+        return agent
+
+    async def on_message(
+        self,
+        msg: PlatformMessage,
+        tools: AgentToolsProtocol,
+        history,
+        participants_msg: str | None,
+        contacts_msg: str | None,
+        *,
+        is_session_bootstrap: bool,
+        room_id: str,
+    ) -> None:
+        is_user = msg.sender_type == "User"
+        is_router = msg.sender_name == "AuditFlow Router"
+        if not (is_user or is_router):
+            logger.info(
+                f"Ignoring message from {msg.sender_name!r} "
+                f"(sender_type={msg.sender_type!r}) - not a query task"
+            )
+            return
+        if msg.id in _processed_message_ids:
+            logger.info(f"Skipping already-processed message {msg.id!r}")
+            return
+        _processed_message_ids.add(msg.id)
+        _replied_message_ids.clear()
+        _active_message_ids_by_room[room_id] = msg.id
+        query_context = _extract_router_query_context(msg.content)
+        if query_context is not None:
+            _query_context_by_message_id[msg.id] = query_context
+            tools.query_entity, tools.query_time_scope = query_context
+        tools.current_message_id = msg.id
+        tools.reply_target = msg.sender_name
+        await super().on_message(
+            msg,
+            tools,
+            history,
+            participants_msg,
+            contacts_msg,
+            is_session_bootstrap=is_session_bootstrap,
+            room_id=room_id,
+        )
+
+
 async def main() -> None:
     agent_id = os.getenv("FINANCE_AGENT_ID")
     api_key = os.getenv("FINANCE_API_KEY")
@@ -184,10 +302,10 @@ async def main() -> None:
             "These are the credentials from the Band platform for the AuditFlow Finance agent."
         )
 
-    adapter = PydanticAIAdapter(
+    adapter = TaskOnlyAdapter(
         model="openai:gpt-4o-mini",
         custom_section=FINANCE_SYSTEM_PROMPT,
-        additional_tools=[query_finance],
+        additional_tools=[query_and_reply_finance],
     )
 
     agent = Agent.create(
