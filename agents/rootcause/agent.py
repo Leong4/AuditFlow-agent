@@ -46,12 +46,12 @@ YOUR ROLE:
 - You receive ReconciliationOutput JSON from AuditFlow Reconciliation.
 - You reconstruct a ReconciliationOutput object from that JSON.
 - You call the run_root_cause_analysis tool to analyze discrepancy causes.
-- You return RootCauseOutput as structured JSON. You do NOT rerun reconciliation.
+- You use RootCauseOutput internally, but the final message to the user must be a plain English summary. You do NOT rerun reconciliation.
 
 IMPORTANT RULES:
 1. Only respond if the message contains a ReconciliationOutput JSON with a discrepancies field.
 2. If the message is a thank-you, acknowledgment, greeting, or any non-data message, do not reply at all.
-3. After running root cause analysis, send the final results as a structured JSON message back to the room mentioning the user directly.
+3. After running root cause analysis, send a plain English summary back to the room mentioning the user directly.
 
 ## HOW TO RESPOND
 - Call `run_root_cause_analysis` with the reconciliation JSON as reconciliation_data.
@@ -298,6 +298,35 @@ async def run_root_cause_analysis(
     output = RootCauseAgent().run(reconciliation_output, trace_id=trace_id)
     return json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
 
+def _looks_like_rootcause_output_json(content: str) -> bool:
+    """
+    Detect whether the model is trying to send raw RootCauseOutput JSON
+    directly to the user.
+
+    Soft guard only:
+    - If this returns True, reply_to_user will NOT send the message.
+    - The outer LLM should convert the JSON into a plain English summary
+      and call reply_to_user again.
+    """
+    text = content.strip()
+
+    if not text.startswith("{"):
+        return False
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    return (
+        "entity" in data
+        and "summary" in data
+        and "anomalies" in data
+        and "error" in data
+    )
 
 async def reply_to_user(
     ctx: RunContext[AgentToolsProtocol],
@@ -306,8 +335,21 @@ async def reply_to_user(
     """
     Send the final root cause analysis result back to the user in the room.
     Always use this tool to reply. Do NOT use thenvoi_send_message.
-    Pass the JSON result content only; the recipient is determined automatically.
+
+    IMPORTANT:
+    - Pass a plain English user-facing summary only.
+    - Do NOT pass raw RootCauseOutput JSON.
+    - If you receive RootCauseOutput JSON from run_root_cause_analysis,
+      summarize it first in plain English, then call this tool.
     """
+    if _looks_like_rootcause_output_json(content):
+        return (
+            "Error: reply_to_user received raw RootCauseOutput JSON. "
+            "Do not send raw JSON to the user. Convert it into the required "
+            "plain English summary format described in HOW TO RESPOND, then "
+            "call reply_to_user again."
+        )
+
     await ctx.deps.get_participants()
     user_mentions = [
         p["name"] for p in ctx.deps.participants
@@ -315,9 +357,9 @@ async def reply_to_user(
     ]
     if not user_mentions:
         return "Error: no user found in room to reply to."
+
     await ctx.deps.send_message(content=content, mentions=user_mentions)
     return f"Sent to user(s): {user_mentions}"
-
 
 class RootCauseAgent:
     """

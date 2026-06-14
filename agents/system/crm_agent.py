@@ -61,6 +61,37 @@ def _extract_router_query_context(content: str) -> tuple[str, str] | None:
 
     return None
 
+def _extract_requested_systems(content: str) -> set[str]:
+    """
+    Extract requested systems from the Router's structured system query.
+
+    Expected line:
+        Systems: crm, erp, finance
+    """
+    systems_match = re.search(r"(?im)^Systems:\s*(.+)$", content)
+    if not systems_match:
+        return set()
+
+    systems_text = systems_match.group(1).lower()
+    return set(re.findall(r"\b(crm|erp|finance)\b", systems_text))
+
+
+def _is_valid_router_system_query(content: str, own_system: str) -> bool:
+    """
+    Only accept structured Router system-query messages.
+
+    This prevents System Agents from processing Router status messages such as:
+        "I've initiated the reconciliation process..."
+    """
+    if "auditflow system query" not in content.lower():
+        return False
+
+    if _extract_router_query_context(content) is None:
+        return False
+
+    requested_systems = _extract_requested_systems(content)
+    return own_system in requested_systems
+
 # ── Mock 数据加载 ─────────────────────────────────────────
 DATA_PATH = ROOT / "data" / "crm_mock.json"
 
@@ -255,21 +286,37 @@ class TaskOnlyAdapter(PydanticAIAdapter):
         is_session_bootstrap: bool,
         room_id: str,
     ) -> None:
+        
         is_user = msg.sender_type == "User"
         is_router = msg.sender_name == "AuditFlow Router"
+
         if not (is_user or is_router):
             logger.info(
                 f"Ignoring message from {msg.sender_name!r} "
                 f"(sender_type={msg.sender_type!r}) - not a query task"
             )
             return
-        if msg.id in _processed_message_ids:
-            logger.info(f"Skipping already-processed message {msg.id!r}")
+
+        message_id = getattr(msg, "id", None)
+        if message_id and message_id in _processed_message_ids:
+            logger.info(f"Skipping already-processed message {message_id!r}")
             return
-        _processed_message_ids.add(msg.id)
+
+        if message_id:
+            _processed_message_ids.add(message_id)
+
+        if is_router and not _is_valid_router_system_query(msg.content, "crm"):
+            logger.info(
+                f"Ignoring Router message {message_id!r} because it is not a valid CRM system query"
+            )
+            return
+
         _replied_message_ids.clear()
-        _active_message_ids_by_room[room_id] = msg.id
-        query_context = _extract_router_query_context(msg.content)
+        if message_id:
+            _active_message_ids_by_room[room_id] = message_id
+
+        query_context = _extract_router_query_context(msg.content) if is_router else None
+
         if query_context is not None:
             _query_context_by_message_id[msg.id] = query_context
             tools.query_entity, tools.query_time_scope = query_context
