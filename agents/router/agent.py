@@ -18,11 +18,13 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
-from pathlib import Path
 import time
+import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic_ai import RunContext
@@ -348,7 +350,8 @@ async def query_systems(
             is_reconciliation is False. Use exact field names like invoice_amount,
             contract_amount, payment_amount, due_date, etc.
     """
-    key = f"{entity}_{time_scope}"
+    query_id = "audit_" + uuid.uuid4().hex[:8]
+    key = query_id
 
     if is_reconciliation:
         normalized_systems = ["crm", "erp", "finance"]
@@ -378,6 +381,7 @@ async def query_systems(
                 "received": {},
                 "entity": entity,
                 "time_scope": time_scope,
+                "query_id": query_id,
                 "created_at": time.monotonic(),
             }
             systems_to_send = normalized_systems
@@ -419,6 +423,7 @@ async def query_systems(
     await ctx.deps.send_message(
         content=(
             "AuditFlow system query\n"
+            f"Query-ID: {query_id}\n"
             f"Entity: {entity}\n"
             f"Time scope: {time_scope}\n"
             f"Systems: {', '.join(normalized_systems)}"
@@ -486,39 +491,71 @@ class CountingAdapter(PydanticAIAdapter):
         sender_system = system_from_sender(msg.sender_name)
 
         if sender_system is not None:
-            active_key = None
-            active_entry = None
+            payload = extract_json_payload(msg.content)
+            query_id = ""
+
+            try:
+                parsed_payload = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    f"Dropped system-agent reply from {msg.sender_name!r} "
+                    f"as {sender_system!r}: query_id={query_id!r}, "
+                    f"reason=invalid JSON payload: {exc}"
+                )
+                return
+
+            if isinstance(parsed_payload, dict):
+                raw_query_id = parsed_payload.get("query_id", "")
+                query_id = str(raw_query_id).strip() if raw_query_id is not None else ""
+
+            if not query_id:
+                logger.warning(
+                    f"Dropped system-agent reply from {msg.sender_name!r} "
+                    f"as {sender_system!r}: query_id={query_id!r}, "
+                    "reason=missing query_id"
+                )
+                return
+
+            active_key = query_id
 
             async with pending_queries_lock:
 
                 cleanup_stale_pending_queries_locked()
 
-                for key, entry in pending_queries.items():
-                    expected_systems = entry["expected_systems"]
-                    received = entry["received"]
-
-                    if (
-                        sender_system in expected_systems
-                        and sender_system not in received
-                    ):
-                        active_key = key
-                        active_entry = entry
-                        break
-
+                active_entry = pending_queries.get(query_id)
                 if active_entry is None:
                     logger.warning(
-                        f"Received system-agent reply from {msg.sender_name!r} "
-                        f"as {sender_system!r}, but no matching pending query is active"
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        "reason=no matching pending query"
                     )
                     return
-
-                active_entry["received"][sender_system] = extract_json_payload(msg.content)
 
                 expected_systems = active_entry["expected_systems"]
                 received = active_entry["received"]
 
+                if sender_system not in expected_systems:
+                    logger.warning(
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        f"reason=sender system not expected; "
+                        f"expected={sorted(expected_systems)}"
+                    )
+                    return
+
+                if sender_system in received:
+                    logger.warning(
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        "reason=sender system already received"
+                    )
+                    return
+
+                active_entry["received"][sender_system] = payload
+
                 logger.info(
                     f"Received reply from {msg.sender_name} as {sender_system} "
+                    f"for query_id={query_id!r} "
                     f"({len(received)}/{len(expected_systems)}), "
                     f"expected={sorted(expected_systems)}"
                 )
@@ -575,7 +612,7 @@ class CountingAdapter(PydanticAIAdapter):
                 )
                 logger.info(
                     f"Forwarded to Reconciliation for {latest_entry['entity']}, "
-                    f"{latest_entry['time_scope']}"
+                    f"{latest_entry['time_scope']} (query_id={active_key!r})"
                 )
 
             return
