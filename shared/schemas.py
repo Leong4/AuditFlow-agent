@@ -221,6 +221,7 @@ class ReconciliationOutput:
     discrepancies: list[Discrepancy] = field(default_factory=list)
     matched: list[MatchedField] = field(default_factory=list)
     error: Optional[str] = None
+    query_id: str = ""
 
 
 # ─────────────────────────────────────────────

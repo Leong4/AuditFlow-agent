@@ -58,13 +58,13 @@ You are the Reconciliation Agent in the AuditFlow multi-agent reconciliation sys
 YOUR ROLE:
 - You receive data from one or more of: AuditFlow CRM, AuditFlow ERP, AuditFlow Finance.
 - If only ONE system's data is present: summarize it in plain English and reply to the user directly using reply_to_user.
-- If TWO OR THREE systems' data are present: run reconciliation using run_reconciliation, then forward results to RootCause using reply_to_rootcause.
+- If TWO OR THREE systems' data are present: call reconcile_and_reply_rootcause once. It runs reconciliation and forwards code-built JSON to RootCause.
 - You report only matched fields and discrepancies. You do NOT explain root causes.
 
 IMPORTANT RULES:
-1. You MUST always respond when you receive a message from AuditFlow Router. Never stay silent. If the message contains structured data from one or more system agents, process it. If you are unsure whether input is single-system or multi-system, count the labeled sections ([AuditFlow CRM], [AuditFlow ERP], [AuditFlow Finance]) in the message. One section = single-system, use reply_to_user. Two or more = multi-system, use run_reconciliation then reply_to_rootcause.
+1. You MUST always respond when you receive a message from AuditFlow Router. Never stay silent. If the message contains structured data from one or more system agents, process it. If you are unsure whether input is single-system or multi-system, count the labeled sections ([AuditFlow CRM], [AuditFlow ERP], [AuditFlow Finance]) in the message. One section = single-system, use reply_to_user. Two or more = multi-system, use reconcile_and_reply_rootcause.
 2. The only messages you receive are from AuditFlow Router, which always contain system agent data. Do not worry about thank-you or greeting messages — they will not reach you.
-3. After running reconciliation, send the results as a structured JSON message mentioning AuditFlow RootCause.
+3. For multi-system reconciliation, reconcile_and_reply_rootcause sends the structured JSON message mentioning AuditFlow RootCause.
 
 ## HOW TO RESPOND
 ## SINGLE-SYSTEM FACT LOOKUP
@@ -81,13 +81,12 @@ If ONLY ONE system's data is present:
   2026-03-01, due_date: 2026-03-31, delivery_status: delivered."
 
 If TWO OR THREE systems' data are present:
-- Proceed with normal reconciliation: call run_reconciliation, then reply_to_rootcause.
+- Proceed with normal reconciliation: call reconcile_and_reply_rootcause exactly once.
 
-- Call `run_reconciliation` with the raw text sections from each system agent as crm_data, erp_data, finance_data.
-- Then send the result using `reply_to_rootcause`, passing the JSON output from run_reconciliation as content.
+- Call `reconcile_and_reply_rootcause` with the raw text sections from each system agent as crm_data, erp_data, finance_data.
+- Do NOT call run_reconciliation and then reply_to_rootcause for multi-system reconciliation.
 - NEVER use thenvoi_send_message. NEVER specify @mentions yourself.
-- For multi-system reconciliation: your reply_to_rootcause content must be a JSON object in this shape:
-  {"message_type": "reconciliation_output", "reconciliation": <run_reconciliation result>}
+- For multi-system reconciliation: reconcile_and_reply_rootcause builds and sends the JSON itself.
 - For single-system: reply_to_user content must be plain English only, never JSON.
 
 ## ENTITY EXTRACTION RULE
@@ -388,13 +387,41 @@ async def run_reconciliation(
             f"Call reply_to_user with a plain English summary of this data: {data[:500]}"
         )
 
+    output = _reconcile_raw_system_data(crm_data, erp_data, finance_data)
+    return json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+
+
+def _reconcile_raw_system_data(
+    crm_data: str,
+    erp_data: str,
+    finance_data: str,
+) -> ReconciliationOutput:
     crm = _parse_system_output(crm_data, CRMOutput, "crm")
     erp = _parse_system_output(erp_data, ERPOutput, "erp")
     finance = _parse_system_output(finance_data, FinanceOutput, "finance")
     logger.info(f"Parsed: crm.entity={crm.entity!r}, erp.entity={erp.entity!r}, finance.entity={finance.entity!r}")
 
-    output = reconcile(crm, erp, finance)
-    return json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+    return reconcile(crm, erp, finance)
+
+
+async def reconcile_and_reply_rootcause(
+    ctx: RunContext[AgentToolsProtocol],
+    crm_data: str,
+    erp_data: str,
+    finance_data: str,
+) -> str:
+    """
+    Run reconciliation on CRM, ERP, and Finance data, then send the exact
+    code-built ReconciliationOutput JSON to AuditFlow RootCause.
+    Use this for multi-system reconciliation instead of calling
+    run_reconciliation and reply_to_rootcause separately.
+    """
+    output = _reconcile_raw_system_data(crm_data, erp_data, finance_data)
+    content = json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+
+    await ctx.deps.get_participants()
+    await ctx.deps.send_message(content=content, mentions=["AuditFlow RootCause"])
+    return "Reconciliation complete and sent to AuditFlow RootCause"
 
 
 async def reply_to_rootcause(
@@ -964,6 +991,30 @@ def _build_entity_consistency(
     )
 
 
+def _derive_query_id(
+    crm: CRMOutput,
+    erp: ERPOutput,
+    finance: FinanceOutput
+) -> str:
+    query_ids = [
+        str(query_id).strip()
+        for query_id in (
+            getattr(crm, "query_id", ""),
+            getattr(erp, "query_id", ""),
+            getattr(finance, "query_id", ""),
+        )
+        if query_id
+    ]
+
+    if len(set(query_ids)) > 1:
+        logger.warning(
+            "Mismatched query_id values in reconciliation inputs: "
+            f"crm={crm.query_id!r}, erp={erp.query_id!r}, finance={finance.query_id!r}"
+        )
+
+    return query_ids[0] if query_ids else ""
+
+
 # Reconciliation Agent 的主入口函数。
 # 输入三个系统的结构化输出，返回 ReconciliationOutput。
 def reconcile(
@@ -982,6 +1033,7 @@ def reconcile(
 
     matched: list[MatchedField] = []
     discrepancies: list[Discrepancy] = []
+    query_id = _derive_query_id(crm, erp, finance)
 
     try:
         entity_consistency = _build_entity_consistency(crm, erp, finance)
@@ -999,7 +1051,8 @@ def reconcile(
             entity_consistency=entity_consistency,
             discrepancies=discrepancies,
             matched=matched,
-            error=None
+            error=None,
+            query_id=query_id
         )
 
         if trace is not None:
@@ -1035,7 +1088,8 @@ def reconcile(
 
         return ReconciliationOutput(
             entity=crm.entity if crm.entity else "",
-            error=str(e)
+            error=str(e),
+            query_id=query_id
         )
 
 
@@ -1116,7 +1170,7 @@ async def main() -> None:
     adapter = ReconOnlyAdapter(
         model="openai:gpt-4o-mini",
         custom_section=RECONCILIATION_SYSTEM_PROMPT,
-        additional_tools=[run_reconciliation, reply_to_rootcause, reply_to_user],
+        additional_tools=[reconcile_and_reply_rootcause, reply_to_user],
     )
 
     agent = Agent.create(
