@@ -103,6 +103,7 @@ class CRMOutput:
     error: Optional[str] = None     # 查询失败时填写错误信息
     customer_id: str = ""
     contract_id: str = ""
+    query_id: str = ""
 
 
 @dataclass
@@ -131,6 +132,7 @@ class ERPOutput:
     error: Optional[str] = None
     customer_id: str = ""
     contract_id: str = ""
+    query_id: str = ""
 
 
 @dataclass
@@ -165,6 +167,7 @@ class FinanceOutput:
     bank_fee: float = 0.0
     original_currency_amount: Optional[float] = None
     exchange_rate_date: str = ""
+    query_id: str = ""
 
 
 # ─────────────────────────────────────────────
@@ -218,6 +221,7 @@ class ReconciliationOutput:
     discrepancies: list[Discrepancy] = field(default_factory=list)
     matched: list[MatchedField] = field(default_factory=list)
     error: Optional[str] = None
+    query_id: str = ""
 
 
 # ─────────────────────────────────────────────

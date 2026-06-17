@@ -18,11 +18,13 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
-from pathlib import Path
 import time
+import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic_ai import RunContext
@@ -47,13 +49,14 @@ ROUTER_SYSTEM_PROMPT = """
 You are the AuditFlow Router. Your ONLY job is to route user questions to the correct system agents by calling the `query_systems` tool. You never answer questions yourself, never explain data, and never perform analysis. Always respond in English.
 
 ## QUERYING SYSTEMS
-To query systems, use ONLY the `query_systems(entity, time_scope, systems)` tool.
+To query systems, use ONLY the `query_systems(entity, time_scope, is_reconciliation, fields_mentioned)` tool.
 - `entity`: the company/customer name, extracted EXACTLY as the user wrote it.
 - `time_scope`: the time period, extracted EXACTLY as the user wrote it. Never invent, convert, or assume a time period. If the user said "Q1 2026", pass "Q1 2026".
-- `systems`: a list containing one or more of "crm", "erp", "finance".
+- `is_reconciliation`: set to true if the user wants a reconciliation, an anomaly/consistency check, or any comparison across systems. Set to false if the user is asking for a single specific fact.
+- `fields_mentioned`: the specific business field names the user asked about. Only needed when is_reconciliation is false.
 
 CRITICAL — CALL query_systems EXACTLY ONCE PER USER REQUEST:
-- You must call `query_systems` ONE time only per user question, with ALL needed systems in a single list.
+- You must call `query_systems` ONE time only per user question.
 - A repeated reconciliation request is still a new user request. If the user asks "Reconcile X for Y" again, you must call `query_systems` again. Do NOT decide from conversation history that the process is still ongoing.
 - After calling query_systems, STOP. Do not call it again. Do not call any other tool.
 - Wait silently for the system agents to reply. You will be notified when data is ready.
@@ -63,24 +66,28 @@ CRITICAL — CALL query_systems EXACTLY ONCE PER USER REQUEST:
 
 You never @mention system agents yourself, and forwarding the collected data to Reconciliation happens automatically outside of you. You must never try to contact AuditFlow CRM, ERP, Finance, Reconciliation, or RootCause directly.
 
-## HOW TO CHOOSE `systems`
-Decide which systems based on what the question is about:
-- "crm"     -> contract amount, payment terms, sign date, customer info
-- "erp"     -> invoice amount, due date, delivery status, installment info
-- "finance" -> payment received, refunds, bank fees, exchange rate, overdue days
+## HOW TO CLASSIFY THE REQUEST
+Your job is to fill is_reconciliation and fields_mentioned correctly.
 
-Number of systems depends on the question:
-- ONE system: the user asks about a single system's facts only.
-    e.g. "What is Acme Corp's contract amount?" -> ["crm"]
-    e.g. "When is this invoice due?" -> ["erp"]
-    e.g. "How much did Acme pay last quarter?" -> ["finance"]
-- TWO systems: the question compares exactly two systems.
-    e.g. "Why is the invoice amount different from the payment received?" -> ["erp", "finance"]
-    e.g. "Contract is signed but not yet invoiced?" -> ["crm", "erp"]
-- THREE systems: full reconciliation or anomaly check across the whole chain.
-    e.g. "Why don't the contract, invoice, and payment match?" -> ["crm", "erp", "finance"]
-    e.g. "Is there anything abnormal with this Acme transaction?" -> ["crm", "erp", "finance"]
-    e.g. "Reconcile Acme Corp for Q1 2026." -> ["crm", "erp", "finance"]
+Set `is_reconciliation = true` when the user wants systems compared or checked together:
+- "Reconcile Acme Corp for Q1 2026."
+- "Why don't the contract, invoice, and payment match?"
+- "Is there anything abnormal with this Acme transaction?"
+- "Does the invoice match what was paid?"
+For these, leave fields_mentioned empty. Code will query all three systems.
+
+Set `is_reconciliation = false` when the user asks for ONE specific fact:
+- "What is Acme Corp's contract amount?" -> fields_mentioned=["contract_amount"]
+- "When is this invoice due?" -> fields_mentioned=["due_date"]
+- "How much did Acme pay last quarter?" -> fields_mentioned=["payment_amount"]
+- "What is the invoice amount for Acme?" -> fields_mentioned=["invoice_amount"]
+
+Use these exact field names where possible:
+- CRM fields: contract_amount, payment_terms, sign_date, sales_owner, status
+- ERP fields: invoice_amount, invoice_id, invoice_date, due_date, delivery_status
+- Finance fields: payment_amount, payment_date, bank_fee, tax_deduction, refund_amount, exchange_rate, overdue_days
+
+If the user asks for a single fact but you cannot map it to any field name above, still set is_reconciliation=false and pass your best guess of the field name. If you truly cannot tell what they want, the system will ask them to clarify.
 
 ## WHEN THE QUESTION IS TOO VAGUE
 If the question is too vague to determine which systems to query (e.g. "Is Acme Corp okay?", "Check this customer", "How are things lately?"), do NOT call `query_systems` and do NOT guess. Instead, ask the user one clarifying question (see next section). If the user's answer is still too vague, keep asking clarifying questions until you have enough to choose the systems. Only call `query_systems` once you know which systems are needed. Never guess the systems.
@@ -97,8 +104,8 @@ To ask the user a clarifying question, use the `ask_user_clarification(content)`
 You will see messages in the room that are NOT user questions — for example replies or results from AuditFlow Reconciliation, AuditFlow RootCause, or acknowledgments and thank-you messages from other agents. These are NOT tasks for you. When a message is not a user question that requires routing, do nothing: do not call any tool, do not reply, output nothing. Only act on genuine user questions that need routing.
 
 ## SUMMARY OF YOUR BEHAVIOR
-- User question, clear -> call `query_systems` with the right entity, time_scope, systems.
-- User question, too vague -> ask one clarifying question with thenvoi_send_message, mentioning only the user who asked.
+- User question, clear -> call `query_systems` with entity, time_scope, is_reconciliation, and fields_mentioned.
+- User question, too vague -> ask one clarifying question with ask_user_clarification, mentioning only the user who asked.
 - Anything else (agent replies, results, acknowledgments) -> do nothing.
 - Never answer, explain, analyze, or summarize data yourself. Always respond in English.
 """
@@ -287,28 +294,80 @@ def _looks_like_router_status_message(content: str) -> bool:
 
     return any(phrase in text for phrase in blocked_phrases)
 
+def systems_from_fields(fields_mentioned: list[str]) -> list[str]:
+    """
+    Map business field names to the systems that own them.
+    Returns canonical system names (crm/erp/finance) in preferred order.
+    """
+    FIELD_TO_SYSTEM: dict[str, str] = {
+        "invoice_amount": "erp",
+        "invoice_id": "erp",
+        "invoice_date": "erp",
+        "due_date": "erp",
+        "delivery_status": "erp",
+        "installment_number": "erp",
+        "payment_amount": "finance",
+        "payment_received": "finance",
+        "payment_date": "finance",
+        "bank_fee": "finance",
+        "tax_deduction": "finance",
+        "refund_amount": "finance",
+        "exchange_rate": "finance",
+        "overdue_days": "finance",
+        "contract_amount": "crm",
+        "payment_terms": "crm",
+        "sign_date": "crm",
+        "sales_owner": "crm",
+        "status": "crm",
+    }
+    found: list[str] = []
+    for field in fields_mentioned:
+        key = field.strip().lower().replace(" ", "_")
+        system = FIELD_TO_SYSTEM.get(key)
+        if system and system not in found:
+            found.append(system)
+    preferred_order = ["crm", "erp", "finance"]
+    return [s for s in preferred_order if s in found]
+
 async def query_systems(
     ctx: RunContext[AgentToolsProtocol],
     entity: str,
     time_scope: str,
-    systems: list[str],
+    is_reconciliation: bool,
+    fields_mentioned: list[str] = [],
 ) -> str:
     """
-    Query one or more AuditFlow system agents.
+    Query AuditFlow system agents for data about an entity.
 
-    Internally, pending query state uses canonical system names:
-    crm / erp / finance.
-
-    For sending Band mentions in the new room, we use agent handles.
+    Args:
+        entity: Company/customer name, exactly as the user wrote it.
+        time_scope: Time period, exactly as the user wrote it.
+        is_reconciliation: True if the user wants a full reconciliation, anomaly
+            check, or cross-system comparison (anything needing multiple systems
+            compared). False if the user asks about a single specific fact.
+        fields_mentioned: The specific business field names the user asked about,
+            e.g. ["invoice_amount"] or ["contract_amount"]. Only used when
+            is_reconciliation is False. Use exact field names like invoice_amount,
+            contract_amount, payment_amount, due_date, etc.
     """
-    key = f"{entity}_{time_scope}"
+    query_id = "audit_" + uuid.uuid4().hex[:8]
+    key = query_id
 
-    normalized_systems = normalize_requested_systems(systems)
-    logger.info(f"Normalized requested systems from {systems!r} to {normalized_systems!r}")
-
-    if not normalized_systems:
-        logger.warning(f"query_systems called with no valid systems: {systems!r}")
-        return "Error: no valid systems requested."
+    if is_reconciliation:
+        normalized_systems = ["crm", "erp", "finance"]
+        logger.info("Reconciliation request -> querying all three systems.")
+    else:
+        normalized_systems = systems_from_fields(fields_mentioned)
+        logger.info(
+            f"Fact lookup: fields={fields_mentioned!r} -> systems={normalized_systems!r}"
+        )
+        if not normalized_systems:
+            logger.info("No systems could be determined from fields; clarification needed.")
+            return (
+                "NEEDS_CLARIFICATION: Could not determine which systems to query. "
+                "Call ask_user_clarification to ask the user whether they want "
+                "contract details (CRM), invoice details (ERP), or payment details (Finance)."
+            )
 
     async with pending_queries_lock:
         cleanup_stale_pending_queries_locked()
@@ -322,6 +381,7 @@ async def query_systems(
                 "received": {},
                 "entity": entity,
                 "time_scope": time_scope,
+                "query_id": query_id,
                 "created_at": time.monotonic(),
             }
             systems_to_send = normalized_systems
@@ -363,6 +423,7 @@ async def query_systems(
     await ctx.deps.send_message(
         content=(
             "AuditFlow system query\n"
+            f"Query-ID: {query_id}\n"
             f"Entity: {entity}\n"
             f"Time scope: {time_scope}\n"
             f"Systems: {', '.join(normalized_systems)}"
@@ -430,39 +491,71 @@ class CountingAdapter(PydanticAIAdapter):
         sender_system = system_from_sender(msg.sender_name)
 
         if sender_system is not None:
-            active_key = None
-            active_entry = None
+            payload = extract_json_payload(msg.content)
+            query_id = ""
+
+            try:
+                parsed_payload = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    f"Dropped system-agent reply from {msg.sender_name!r} "
+                    f"as {sender_system!r}: query_id={query_id!r}, "
+                    f"reason=invalid JSON payload: {exc}"
+                )
+                return
+
+            if isinstance(parsed_payload, dict):
+                raw_query_id = parsed_payload.get("query_id", "")
+                query_id = str(raw_query_id).strip() if raw_query_id is not None else ""
+
+            if not query_id:
+                logger.warning(
+                    f"Dropped system-agent reply from {msg.sender_name!r} "
+                    f"as {sender_system!r}: query_id={query_id!r}, "
+                    "reason=missing query_id"
+                )
+                return
+
+            active_key = query_id
 
             async with pending_queries_lock:
 
                 cleanup_stale_pending_queries_locked()
 
-                for key, entry in pending_queries.items():
-                    expected_systems = entry["expected_systems"]
-                    received = entry["received"]
-
-                    if (
-                        sender_system in expected_systems
-                        and sender_system not in received
-                    ):
-                        active_key = key
-                        active_entry = entry
-                        break
-
+                active_entry = pending_queries.get(query_id)
                 if active_entry is None:
                     logger.warning(
-                        f"Received system-agent reply from {msg.sender_name!r} "
-                        f"as {sender_system!r}, but no matching pending query is active"
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        "reason=no matching pending query"
                     )
                     return
-
-                active_entry["received"][sender_system] = extract_json_payload(msg.content)
 
                 expected_systems = active_entry["expected_systems"]
                 received = active_entry["received"]
 
+                if sender_system not in expected_systems:
+                    logger.warning(
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        f"reason=sender system not expected; "
+                        f"expected={sorted(expected_systems)}"
+                    )
+                    return
+
+                if sender_system in received:
+                    logger.warning(
+                        f"Dropped system-agent reply from {msg.sender_name!r} "
+                        f"as {sender_system!r}: query_id={query_id!r}, "
+                        "reason=sender system already received"
+                    )
+                    return
+
+                active_entry["received"][sender_system] = payload
+
                 logger.info(
                     f"Received reply from {msg.sender_name} as {sender_system} "
+                    f"for query_id={query_id!r} "
                     f"({len(received)}/{len(expected_systems)}), "
                     f"expected={sorted(expected_systems)}"
                 )
@@ -488,9 +581,22 @@ class CountingAdapter(PydanticAIAdapter):
                         )
                         return
 
+                    received_systems = list(received.keys())
+                    if len(received_systems) == 1:
+                        prefix = (
+                            f"Single-system data lookup result for "
+                            f"{latest_entry['entity']}, {latest_entry['time_scope']}. "
+                            f"Do NOT reconcile. Summarize this data in plain English "
+                            f"and reply to the user directly using reply_to_user."
+                        )
+                    else:
+                        prefix = (
+                            f"Reconcile the following data for "
+                            f"{latest_entry['entity']}, {latest_entry['time_scope']}:"
+                        )
+
                     forward_content = (
-                        f"Reconcile the following data for {latest_entry['entity']}, "
-                        f"{latest_entry['time_scope']}:\n\n"
+                        prefix + "\n\n"
                         + "\n\n".join(
                             f"[{SYSTEM_AGENT_DISPLAY_NAMES.get(system, system)}]:\n{content}"
                             for system, content in received.items()
@@ -506,7 +612,7 @@ class CountingAdapter(PydanticAIAdapter):
                 )
                 logger.info(
                     f"Forwarded to Reconciliation for {latest_entry['entity']}, "
-                    f"{latest_entry['time_scope']}"
+                    f"{latest_entry['time_scope']} (query_id={active_key!r})"
                 )
 
             return

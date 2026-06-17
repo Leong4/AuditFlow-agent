@@ -37,6 +37,8 @@ from agents.rootcause.llm_client import RootCauseLLMClient, LLMClientError  # no
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_replied_message_ids: set[str] = set()
+_rootcause_output_by_message_id: dict[str, RootCauseOutput] = {}
 
 
 ROOTCAUSE_SYSTEM_PROMPT = """
@@ -51,11 +53,16 @@ YOUR ROLE:
 IMPORTANT RULES:
 1. Only respond if the message contains a ReconciliationOutput JSON with a discrepancies field.
 2. If the message is a thank-you, acknowledgment, greeting, or any non-data message, do not reply at all.
-3. After running root cause analysis, send a plain English summary back to the room mentioning the user directly.
+3. For EVERY message containing reconciliation data, your FIRST action MUST be to call `run_root_cause_analysis` with the reconciliation JSON.
+4. NEVER call `reply_to_user` before calling `run_root_cause_analysis`.
+5. NEVER write your own summary from reconciliation data before calling `run_root_cause_analysis`, even when the data looks clean or fully consistent.
+6. After running root cause analysis, send a plain English summary back to the room mentioning the user directly unless the tool reports that it already replied.
 
 ## HOW TO RESPOND
-- Call `run_root_cause_analysis` with the reconciliation JSON as reconciliation_data.
-- Then call `reply_to_user` with a plain English summary (NOT raw JSON). Structure your reply like this:
+- For both clean/no-discrepancy cases and anomaly cases, call `run_root_cause_analysis` with the reconciliation JSON as reconciliation_data before doing anything else.
+- Even if the reconciliation data has no discrepancies or all fields appear consistent, do not shortcut to a manual "everything matches" reply; call `run_root_cause_analysis` first.
+- If the return value starts with "CLEAN_CASE_ALREADY_REPLIED", STOP. Do not call `reply_to_user`; the no-discrepancy reply has already been sent.
+- Otherwise, call `reply_to_user` with a plain English summary (NOT raw JSON). Structure your reply like this:
 
   **AuditFlow Root Cause Analysis — [Entity], [Time Scope]**
 
@@ -295,8 +302,66 @@ async def run_root_cause_analysis(
     _ = ctx
 
     reconciliation_output, trace_id = _parse_reconciliation_output(reconciliation_data)
+    logger.info(
+        f"run_root_cause_analysis started for entity={reconciliation_output.entity!r}"
+    )
     output = RootCauseAgent().run(reconciliation_output, trace_id=trace_id)
-    return json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+    message_id = getattr(ctx.deps, "current_message_id", None)
+    if message_id:
+        _rootcause_output_by_message_id[message_id] = output
+
+    is_clean = (
+        not output.error
+        and output.summary is not None
+        and output.summary.total_discrepancies == 0
+        and len(output.anomalies) == 0
+    )
+    if is_clean and message_id:
+        if message_id in _replied_message_ids:
+            logger.info(
+                f"Clean-case deterministic reply skipped; "
+                f"message_id={message_id!r} already replied"
+            )
+            return (
+                "CLEAN_CASE_ALREADY_REPLIED: A deterministic no-discrepancy "
+                "reply has already been sent to the user. Do not call reply_to_user."
+            )
+
+        try:
+            content = format_rootcause_reply(output)
+            await ctx.deps.get_participants()
+            user_mentions = [
+                p["name"] for p in ctx.deps.participants
+                if p.get("type") == "User"
+            ]
+            if user_mentions:
+                await ctx.deps.send_message(content=content, mentions=user_mentions)
+                _replied_message_ids.add(message_id)
+                logger.info(
+                    f"Clean-case deterministic reply sent for "
+                    f"message_id={message_id!r} to user(s): {user_mentions}"
+                )
+                return (
+                    "CLEAN_CASE_ALREADY_REPLIED: A deterministic no-discrepancy "
+                    "reply has already been sent to the user. Do not call reply_to_user."
+                )
+
+            logger.warning(
+                f"Clean-case deterministic reply found no user participants for "
+                f"message_id={message_id!r}; falling through to LLM reply path"
+            )
+        except Exception as exc:
+            logger.exception(
+                f"Clean-case deterministic reply failed for "
+                f"message_id={message_id!r}: {exc}; falling through to LLM reply path"
+            )
+
+    result = json.dumps(_json_safe(output), ensure_ascii=False, indent=2)
+    logger.info(
+        f"run_root_cause_analysis completed for entity={reconciliation_output.entity!r}; "
+        "returning result to LLM"
+    )
+    return result
 
 def _looks_like_rootcause_output_json(content: str) -> bool:
     """
@@ -328,6 +393,104 @@ def _looks_like_rootcause_output_json(content: str) -> bool:
         and "error" in data
     )
 
+
+def _display_value(value: Any) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
+
+
+def format_rootcause_reply(output: RootCauseOutput) -> str:
+    entity = output.entity or "Unknown entity"
+    lines = [f"**AuditFlow Root Cause Analysis — {entity}**", ""]
+
+    if output.error:
+        lines.extend([
+            "**Summary:** Root cause analysis could not be completed.",
+            "",
+            f"Error: {output.error}",
+        ])
+        return "\n".join(lines)
+
+    summary = output.summary
+    total = summary.total_discrepancies if summary is not None else len(output.anomalies)
+    normal = summary.normal if summary is not None else 0
+    anomaly = summary.anomaly if summary is not None else 0
+    watch = summary.watch if summary is not None else 0
+
+    lines.append(
+        f"**Summary:** {total} discrepancies found. "
+        f"Normal: {normal}, Anomaly: {anomaly}, Watch: {watch}."
+    )
+
+    if total == 0 or not output.anomalies:
+        lines.extend([
+            "",
+            "All fields are consistent across CRM, ERP, and Finance. No action required.",
+        ])
+        return "\n".join(lines)
+
+    for anomaly_item in output.anomalies:
+        lines.extend([
+            "",
+            f"- **{anomaly_item.field_pair}**: {anomaly_item.probable_cause}. "
+            f"Status: {_display_value(anomaly_item.status)}. "
+            f"Risk: {_display_value(anomaly_item.risk_level)}.",
+        ])
+
+        if anomaly_item.evidence:
+            evidence = "; ".join(anomaly_item.evidence[:3])
+            lines.append(f"  Evidence: {evidence}.")
+
+        action = anomaly_item.recommended_action or "Review the discrepancy and confirm the correct source data."
+        lines.append(f"  Recommended action: {action}")
+
+    return "\n".join(lines)
+
+
+async def _maybe_send_fallback_reply(
+    tools: AgentToolsProtocol,
+    message_id: str,
+) -> bool:
+    if message_id in _replied_message_ids:
+        return False
+
+    try:
+        output = _rootcause_output_by_message_id.get(message_id)
+        if output is None:
+            logger.warning(
+                f"No rootcause output cached for message_id={message_id!r}; "
+                "cannot send fallback"
+            )
+            return False
+
+        content = format_rootcause_reply(output)
+        await tools.get_participants()
+        user_mentions = [
+            p["name"] for p in tools.participants
+            if p.get("type") == "User"
+        ]
+        if not user_mentions:
+            logger.warning(
+                f"Fallback reply found no user participants for "
+                f"message_id={message_id!r}; reply was not sent"
+            )
+            return False
+
+        await tools.send_message(content=content, mentions=user_mentions)
+        _replied_message_ids.add(message_id)
+        logger.info(
+            f"Fallback reply sent for message_id={message_id!r} "
+            f"to user(s): {user_mentions}"
+        )
+        return True
+    except Exception as exc:
+        logger.exception(
+            f"Fallback reply failed for message_id={message_id!r}: {exc}"
+        )
+        return False
+
+
 async def reply_to_user(
     ctx: RunContext[AgentToolsProtocol],
     content: str,
@@ -342,7 +505,22 @@ async def reply_to_user(
     - If you receive RootCauseOutput JSON from run_root_cause_analysis,
       summarize it first in plain English, then call this tool.
     """
-    if _looks_like_rootcause_output_json(content):
+    message_id = getattr(ctx.deps, "current_message_id", None)
+    if message_id and message_id in _replied_message_ids:
+        logger.info(
+            f"reply_to_user skipped; message_id={message_id!r} already replied"
+        )
+        return "Already replied to user for this message; not sending again."
+
+    looks_like_raw_json = _looks_like_rootcause_output_json(content)
+    logger.info(
+        f"reply_to_user called; looks_like_raw_rootcause_json={looks_like_raw_json}"
+    )
+
+    if looks_like_raw_json:
+        logger.warning(
+            "reply_to_user rejected raw RootCauseOutput JSON; reply was not sent"
+        )
         return (
             "Error: reply_to_user received raw RootCauseOutput JSON. "
             "Do not send raw JSON to the user. Convert it into the required "
@@ -356,9 +534,13 @@ async def reply_to_user(
         if p.get("type") == "User"
     ]
     if not user_mentions:
+        logger.warning("reply_to_user found no user participants; reply was not sent")
         return "Error: no user found in room to reply to."
 
     await ctx.deps.send_message(content=content, mentions=user_mentions)
+    logger.info(f"reply_to_user sent reply to user(s): {user_mentions}")
+    if message_id:
+        _replied_message_ids.add(message_id)
     return f"Sent to user(s): {user_mentions}"
 
 class RootCauseAgent:
@@ -477,15 +659,32 @@ class RootCauseOnlyAdapter(PydanticAIAdapter):
                 f"(sender_type={msg.sender_type!r}) - not from Reconciliation"
             )
             return
-        await super().on_message(
-            msg,
-            tools,
-            history,
-            participants_msg,
-            contacts_msg,
-            is_session_bootstrap=is_session_bootstrap,
-            room_id=room_id,
+        logger.info(
+            f"Accepted RootCause message from {msg.sender_name!r} in room {room_id!r}"
         )
+        message_id = msg.id
+        _replied_message_ids.discard(message_id)
+        _rootcause_output_by_message_id.pop(message_id, None)
+        tools.current_message_id = message_id
+
+        try:
+            await super().on_message(
+                msg,
+                tools,
+                history,
+                participants_msg,
+                contacts_msg,
+                is_session_bootstrap=is_session_bootstrap,
+                room_id=room_id,
+            )
+
+            if message_id in _replied_message_ids:
+                return
+
+            await _maybe_send_fallback_reply(tools, message_id)
+        finally:
+            _rootcause_output_by_message_id.pop(message_id, None)
+            _replied_message_ids.discard(message_id)
 
 
 async def main() -> None:

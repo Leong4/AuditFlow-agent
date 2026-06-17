@@ -42,22 +42,28 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 _processed_message_ids: set[str] = set()
 _active_message_ids_by_room: dict[str, str] = {}
-_query_context_by_message_id: dict[str, tuple[str, str]] = {}
+_query_context_by_message_id: dict[str, tuple[str, str, str]] = {}
 _replied_message_ids: set[str] = set()
 
 
-def _extract_router_query_context(content: str) -> tuple[str, str] | None:
+def _extract_router_query_context(content: str) -> tuple[str, str, str] | None:
+    query_id_match = re.search(r"(?im)^Query-ID:\s*(.+)$", content)
     entity_match = re.search(r"(?im)^Entity:\s*(.+)$", content)
     time_scope_match = re.search(r"(?im)^Time scope:\s*(.+)$", content)
     if entity_match and time_scope_match:
-        return entity_match.group(1).strip(), time_scope_match.group(1).strip()
+        query_id = query_id_match.group(1).strip() if query_id_match else ""
+        return (
+            entity_match.group(1).strip(),
+            time_scope_match.group(1).strip(),
+            query_id,
+        )
 
     legacy_match = re.search(
         r"(?is)\bQuery\s+.+?\s+for\s+(.+?),\s*(.+)$",
         content.strip(),
     )
     if legacy_match:
-        return legacy_match.group(1).strip(), legacy_match.group(2).strip()
+        return legacy_match.group(1).strip(), legacy_match.group(2).strip(), ""
 
     return None
 
@@ -198,9 +204,10 @@ async def query_and_reply_finance(
     if not message_id:
         message_id = _active_message_ids_by_room.get(getattr(ctx.deps, "room_id", ""))
 
+    query_id = ""
     query_context = _query_context_by_message_id.get(message_id or "")
     if query_context is not None:
-        entity, time_scope = query_context
+        entity, time_scope, query_id = query_context
 
     dedupe_key = message_id or f"{getattr(ctx.deps, 'room_id', 'unknown')}:{reply_target}"
     already_replied = dedupe_key in _replied_message_ids
@@ -212,6 +219,7 @@ async def query_and_reply_finance(
     ctx.deps.already_replied = True
 
     result = build_finance_output(entity, time_scope)
+    result.query_id = query_id
     def _enum_safe(obj):
         from enum import Enum
         if isinstance(obj, Enum):
@@ -324,7 +332,8 @@ class TaskOnlyAdapter(PydanticAIAdapter):
 
         if query_context is not None:
             _query_context_by_message_id[msg.id] = query_context
-            tools.query_entity, tools.query_time_scope = query_context
+            entity, time_scope, _ = query_context
+            tools.query_entity, tools.query_time_scope = entity, time_scope
         tools.current_message_id = msg.id
         tools.reply_target = msg.sender_name
         await super().on_message(
