@@ -12,3 +12,5 @@ __pycache__/
 # Runtime artifacts
 .logs/
 .pids/
+*.mp4
+aduit_flow.mp4
