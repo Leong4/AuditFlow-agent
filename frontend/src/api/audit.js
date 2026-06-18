@@ -114,9 +114,53 @@ const MOCK_SCENARIOS = {
 };
 
 const API_BASE = 'http://localhost:8000';
+const USE_MOCK_API =
+  import.meta.env.PROD || import.meta.env.VITE_USE_MOCK_API === 'true';
+const mockSessions = new Map();
+const mockResults = new Map();
 
 function getScenario(entity) {
   return MOCK_SCENARIOS[entity] ?? MOCK_SCENARIOS['Northbridge Retail'];
+}
+
+function extractEntityName(query) {
+  const reconcileMatch = query.match(/reconcile\s+(.+?)\s+for\s+/i);
+  if (reconcileMatch?.[1]) {
+    return reconcileMatch[1].trim();
+  }
+
+  return query;
+}
+
+function createMockAuditSession(queries) {
+  const auditSessionId = `mock_session_${crypto.randomUUID()}`;
+  const sessionQueries = queries.map((query, index) => {
+    const entity = extractEntityName(query);
+    const queryId = `mock_query_${index + 1}_${crypto.randomUUID()}`;
+    const result = createMockAuditResult({
+      entity,
+      query,
+      queryId,
+    });
+
+    mockResults.set(queryId, result);
+
+    return {
+      query_id: queryId,
+      query_text: query,
+      status: 'done',
+    };
+  });
+
+  const session = {
+    audit_session_id: auditSessionId,
+    queries: sessionQueries,
+    room_id: `mock_room_${crypto.randomUUID()}`,
+  };
+
+  mockSessions.set(auditSessionId, session);
+
+  return session;
 }
 
 export function createMockAuditResult({
@@ -189,23 +233,68 @@ async function readJson(response) {
 }
 
 export async function startAudit(queries) {
-  const response = await fetch(`${API_BASE}/api/queries`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ queries }),
-  });
+  if (USE_MOCK_API) {
+    return createMockAuditSession(queries);
+  }
 
-  return readJson(response);
+  try {
+    const response = await fetch(`${API_BASE}/api/queries`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ queries }),
+    });
+
+    return readJson(response);
+  } catch (error) {
+    console.warn('Backend unavailable, using mock audit session:', error);
+    return createMockAuditSession(queries);
+  }
 }
 
 export async function getAuditStatus(auditSessionId) {
-  const response = await fetch(`${API_BASE}/api/queries/${auditSessionId}`);
-  return readJson(response);
+  if (USE_MOCK_API) {
+    const mockSession = mockSessions.get(auditSessionId);
+
+    if (mockSession) {
+      return mockSession;
+    }
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/api/queries/${auditSessionId}`);
+    return readJson(response);
+  } catch (error) {
+    const mockSession = mockSessions.get(auditSessionId);
+
+    if (mockSession) {
+      return mockSession;
+    }
+
+    throw error;
+  }
 }
 
 export async function getAuditResult(queryId) {
-  const response = await fetch(`${API_BASE}/api/queries/${queryId}/result`);
-  return readJson(response);
+  if (USE_MOCK_API) {
+    const mockResult = mockResults.get(queryId);
+
+    if (mockResult) {
+      return mockResult;
+    }
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/api/queries/${queryId}/result`);
+    return readJson(response);
+  } catch (error) {
+    const mockResult = mockResults.get(queryId);
+
+    if (mockResult) {
+      return mockResult;
+    }
+
+    throw error;
+  }
 }
