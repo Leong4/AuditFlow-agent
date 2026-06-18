@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -41,6 +42,7 @@ from shared.thenvoi_pydantic_compat import PydanticAIAdapter  # noqa: E402
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+DEMO_USER_MENTION = "AuditFlow Demo User"
 
 
 # Router Agent Prompt
@@ -265,6 +267,25 @@ def normalize_requested_systems(systems: list[str]) -> list[str]:
     preferred_order = ["crm", "erp", "finance"]
     return [system for system in preferred_order if system in normalized]
 
+def extract_reply_mode(content: str) -> str:
+    """
+    Extract the optional reply-mode control line from the triggering message.
+
+    Default is "user", preserving the historical behavior unless a bridge
+    explicitly sends:
+        Reply-Mode: agent
+    """
+    match = re.search(r"(?im)^Reply-Mode:\s*(.+)$", content)
+    if not match:
+        return "user"
+
+    reply_mode = match.group(1).strip().lower()
+    if reply_mode not in {"user", "agent"}:
+        logger.warning(f"Invalid Reply-Mode {reply_mode!r}; defaulting to 'user'")
+        return "user"
+
+    return reply_mode
+
 def _looks_like_router_status_message(content: str) -> bool:
     """
     Detect progress/status messages that Router should never send to the user.
@@ -351,6 +372,7 @@ async def query_systems(
             contract_amount, payment_amount, due_date, etc.
     """
     query_id = "audit_" + uuid.uuid4().hex[:8]
+    reply_mode = getattr(ctx.deps, "current_reply_mode", "user") or "user"
     key = query_id
 
     if is_reconciliation:
@@ -382,6 +404,7 @@ async def query_systems(
                 "entity": entity,
                 "time_scope": time_scope,
                 "query_id": query_id,
+                "reply_mode": reply_mode,
                 "created_at": time.monotonic(),
             }
             systems_to_send = normalized_systems
@@ -424,6 +447,7 @@ async def query_systems(
         content=(
             "AuditFlow system query\n"
             f"Query-ID: {query_id}\n"
+            f"Reply-Mode: {reply_mode}\n"
             f"Entity: {entity}\n"
             f"Time scope: {time_scope}\n"
             f"Systems: {', '.join(normalized_systems)}"
@@ -594,9 +618,11 @@ class CountingAdapter(PydanticAIAdapter):
                             f"Reconcile the following data for "
                             f"{latest_entry['entity']}, {latest_entry['time_scope']}:"
                         )
+                    reply_mode = str(latest_entry.get("reply_mode", "user") or "user")
 
                     forward_content = (
                         prefix + "\n\n"
+                        + f"Reply-Mode: {reply_mode}\n\n"
                         + "\n\n".join(
                             f"[{SYSTEM_AGENT_DISPLAY_NAMES.get(system, system)}]:\n{content}"
                             for system, content in received.items()
@@ -618,6 +644,9 @@ class CountingAdapter(PydanticAIAdapter):
             return
         if msg.sender_type == "User":
             tools.reply_target = msg.sender_name
+            tools.current_reply_mode = extract_reply_mode(msg.content)
+        elif msg.sender_name == DEMO_USER_MENTION:
+            tools.current_reply_mode = extract_reply_mode(msg.content)
 
         await super().on_message(
             msg,

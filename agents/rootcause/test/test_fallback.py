@@ -5,6 +5,7 @@ from agents.rootcause.agent import (
     _replied_message_ids,
     _rootcause_output_by_message_id,
     format_rootcause_reply,
+    reply_to_user,
 )
 from shared.schemas import (
     AnomalyAnalysis,
@@ -16,8 +17,8 @@ from shared.schemas import (
 
 
 class FakeTools:
-    def __init__(self):
-        self.participants = [
+    def __init__(self, participants=None):
+        self.participants = participants or [
             {"name": "Test User", "type": "User"},
             {"name": "AuditFlow RootCause", "type": "Agent"},
         ]
@@ -31,6 +32,11 @@ class FakeTools:
             "content": content,
             "mentions": mentions,
         })
+
+
+class FakeContext:
+    def __init__(self, deps):
+        self.deps = deps
 
 
 def reset_rootcause_fallback_state():
@@ -77,6 +83,37 @@ def test_fallback_fires_when_not_yet_replied():
     assert tools.sent_messages[0]["content"] == format_rootcause_reply(output)
     assert tools.sent_messages[0]["mentions"] == ["Test User"]
     assert "msg1" in _replied_message_ids
+
+
+def test_reply_to_user_mode_keeps_existing_user_mentions():
+    reset_rootcause_fallback_state()
+    tools = FakeTools()
+    ctx = FakeContext(tools)
+
+    result = asyncio.run(reply_to_user(ctx, "done", reply_mode="user"))
+
+    assert result == "Sent to user(s): ['Test User']"
+    assert tools.sent_messages == [{
+        "content": "done",
+        "mentions": ["Test User"],
+    }]
+
+
+def test_reply_to_agent_mode_mentions_demo_user_without_user_participant():
+    reset_rootcause_fallback_state()
+    tools = FakeTools(participants=[
+        {"name": "AuditFlow CRM", "type": "Agent"},
+        {"name": "AuditFlow RootCause", "type": "Agent"},
+    ])
+    ctx = FakeContext(tools)
+
+    result = asyncio.run(reply_to_user(ctx, "done", reply_mode="agent"))
+
+    assert result == "Sent to user(s): ['AuditFlow Demo User']"
+    assert tools.sent_messages == [{
+        "content": "done",
+        "mentions": ["AuditFlow Demo User"],
+    }]
 
 
 def test_fallback_does_not_fire_when_already_replied():

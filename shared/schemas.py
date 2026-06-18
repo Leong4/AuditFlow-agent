@@ -104,6 +104,7 @@ class CRMOutput:
     customer_id: str = ""
     contract_id: str = ""
     query_id: str = ""
+    reply_mode: str = "user"
 
 
 @dataclass
@@ -133,6 +134,7 @@ class ERPOutput:
     customer_id: str = ""
     contract_id: str = ""
     query_id: str = ""
+    reply_mode: str = "user"
 
 
 @dataclass
@@ -168,6 +170,7 @@ class FinanceOutput:
     original_currency_amount: Optional[float] = None
     exchange_rate_date: str = ""
     query_id: str = ""
+    reply_mode: str = "user"
 
 
 # ─────────────────────────────────────────────
@@ -222,6 +225,7 @@ class ReconciliationOutput:
     matched: list[MatchedField] = field(default_factory=list)
     error: Optional[str] = None
     query_id: str = ""
+    reply_mode: str = "user"
 
 
 # ─────────────────────────────────────────────
@@ -266,4 +270,6 @@ class RootCauseOutput:
     anomalies: list[AnomalyAnalysis] = field(default_factory=list)
     summary: Optional[ReconciliationSummary] = None
     trace_id: str = ""              # 对应 trace.py 里的 trace_id
+    query_id: str = ""
     error: Optional[str] = None
+    reply_mode: str = "user"

@@ -50,6 +50,21 @@ logger = logging.getLogger(__name__)
 TSystemOutput = TypeVar("TSystemOutput", CRMOutput, ERPOutput, FinanceOutput)
 
 
+def _normalize_reply_mode(value: object) -> str:
+    reply_mode = str(value or "user").strip().lower()
+    if reply_mode not in {"user", "agent"}:
+        logger.warning(f"Invalid reply_mode {reply_mode!r}; defaulting to 'user'")
+        return "user"
+    return reply_mode
+
+
+def _extract_reply_mode_from_text(content: str) -> str:
+    reply_mode_match = re.search(r"(?im)^Reply-Mode:\s*(.+)$", content)
+    if not reply_mode_match:
+        return "user"
+    return _normalize_reply_mode(reply_mode_match.group(1))
+
+
 # ── Reconciliation Agent Prompt ───────────────────────────
 
 RECONCILIATION_SYSTEM_PROMPT = """
@@ -433,6 +448,16 @@ async def reply_to_rootcause(
     Always use this tool to send your output. Do NOT use thenvoi_send_message.
     Pass the JSON result content only; the recipient is fixed.
     """
+    reply_mode = getattr(ctx.deps, "current_reply_mode", "user") or "user"
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        content = f"Reply-Mode: {reply_mode}\n\n{content}"
+    else:
+        if isinstance(payload, dict):
+            payload.setdefault("reply_mode", reply_mode)
+            content = json.dumps(payload, ensure_ascii=False, indent=2)
+
     await ctx.deps.get_participants()
     await ctx.deps.send_message(content=content, mentions=["AuditFlow RootCause"])
     return "Sent to AuditFlow RootCause"
@@ -450,10 +475,14 @@ async def reply_to_user(
     """
     await ctx.deps.get_participants()
     logger.info(f"[reply_to_user] participants={ctx.deps.participants!r}")
-    user_mentions = [
-        p["name"] for p in ctx.deps.participants
-        if p.get("type") == "User"
-    ]
+    reply_mode = getattr(ctx.deps, "current_reply_mode", "user") or "user"
+    if reply_mode == "agent":
+        user_mentions = ["AuditFlow Demo User"]
+    else:
+        user_mentions = [
+            p["name"] for p in ctx.deps.participants
+            if p.get("type") == "User"
+        ]
     logger.info(f"[reply_to_user] user_mentions={user_mentions!r}")
     if not user_mentions:
         return "Error: no user found in room to reply to."
@@ -1015,6 +1044,44 @@ def _derive_query_id(
     return query_ids[0] if query_ids else ""
 
 
+def _derive_reply_mode(
+    crm: CRMOutput,
+    erp: ERPOutput,
+    finance: FinanceOutput
+) -> str:
+    reply_modes = [
+        _normalize_reply_mode(reply_mode)
+        for reply_mode in (
+            getattr(crm, "reply_mode", "user"),
+            getattr(erp, "reply_mode", "user"),
+            getattr(finance, "reply_mode", "user"),
+        )
+        if reply_mode
+    ]
+
+    if not reply_modes:
+        return "user"
+
+    unique_modes = set(reply_modes)
+    if len(unique_modes) > 1:
+        logger.warning(
+            "Mismatched reply_mode values in reconciliation inputs: "
+            f"crm={crm.reply_mode!r}, erp={erp.reply_mode!r}, finance={finance.reply_mode!r}"
+        )
+
+    mode_counts = {mode: reply_modes.count(mode) for mode in unique_modes}
+    max_count = max(mode_counts.values())
+    majority_modes = [mode for mode, count in mode_counts.items() if count == max_count]
+    if len(majority_modes) == 1:
+        return majority_modes[0]
+
+    for mode in reply_modes:
+        if mode != "user":
+            return mode
+
+    return reply_modes[0]
+
+
 # Reconciliation Agent 的主入口函数。
 # 输入三个系统的结构化输出，返回 ReconciliationOutput。
 def reconcile(
@@ -1034,6 +1101,7 @@ def reconcile(
     matched: list[MatchedField] = []
     discrepancies: list[Discrepancy] = []
     query_id = _derive_query_id(crm, erp, finance)
+    reply_mode = _derive_reply_mode(crm, erp, finance)
 
     try:
         entity_consistency = _build_entity_consistency(crm, erp, finance)
@@ -1052,7 +1120,8 @@ def reconcile(
             discrepancies=discrepancies,
             matched=matched,
             error=None,
-            query_id=query_id
+            query_id=query_id,
+            reply_mode=reply_mode
         )
 
         if trace is not None:
@@ -1089,7 +1158,8 @@ def reconcile(
         return ReconciliationOutput(
             entity=crm.entity if crm.entity else "",
             error=str(e),
-            query_id=query_id
+            query_id=query_id,
+            reply_mode=reply_mode
         )
 
 
@@ -1146,6 +1216,7 @@ class ReconOnlyAdapter(PydanticAIAdapter):
                 f"(sender_type={msg.sender_type!r}) - not from Router"
             )
             return
+        tools.current_reply_mode = _extract_reply_mode_from_text(msg.content)
         await super().on_message(
             msg,
             tools,

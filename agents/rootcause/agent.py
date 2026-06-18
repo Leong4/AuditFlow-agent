@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import asdict, fields, is_dataclass
 from enum import Enum
@@ -39,6 +40,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 _replied_message_ids: set[str] = set()
 _rootcause_output_by_message_id: dict[str, RootCauseOutput] = {}
+_reply_mode_by_message_id: dict[str, str] = {}
+DEMO_USER_MENTION = "AuditFlow Demo User"
 
 
 ROOTCAUSE_SYSTEM_PROMPT = """
@@ -197,6 +200,44 @@ def _find_reconciliation_payload(payload: Any) -> dict[str, Any] | None:
     return None
 
 
+def _normalize_reply_mode(value: object) -> str:
+    reply_mode = str(value or "user").strip().lower()
+    if reply_mode not in {"user", "agent"}:
+        logger.warning(f"Invalid reply_mode {reply_mode!r}; defaulting to 'user'")
+        return "user"
+    return reply_mode
+
+
+def _extract_reply_mode_from_text(raw_text: str) -> str:
+    reply_mode_match = re.search(r"(?im)^Reply-Mode:\s*(.+)$", raw_text)
+    if reply_mode_match:
+        return _normalize_reply_mode(reply_mode_match.group(1))
+
+    try:
+        parsed = _extract_dict_from_text(raw_text)
+    except ValueError:
+        return "user"
+
+    payload = _find_reconciliation_payload(parsed)
+    if payload is not None:
+        return _normalize_reply_mode(payload.get("reply_mode", "user"))
+
+    if isinstance(parsed, dict):
+        return _normalize_reply_mode(parsed.get("reply_mode", "user"))
+
+    return "user"
+
+
+def _reply_mentions(participants: list[dict], reply_mode: str) -> list[str]:
+    if _normalize_reply_mode(reply_mode) == "agent":
+        return [DEMO_USER_MENTION]
+
+    return [
+        p["name"] for p in participants
+        if p.get("type") == "User"
+    ]
+
+
 def _build_entity_consistency(value: Any) -> EntityConsistency | None:
     if value in (None, "", "None"):
         return None
@@ -277,12 +318,20 @@ def _parse_reconciliation_output(raw_text: str) -> tuple[ReconciliationOutput, s
     if payload is None:
         raise ValueError("Could not find ReconciliationOutput JSON with a discrepancies field.")
 
+    raw_reply_mode = payload.get("reply_mode")
+    if not raw_reply_mode and isinstance(parsed, dict):
+        raw_reply_mode = parsed.get("reply_mode")
+    if not raw_reply_mode:
+        raw_reply_mode = _extract_reply_mode_from_text(raw_text)
+
     reconciliation_output = ReconciliationOutput(
         entity=payload.get("entity", ""),
         entity_consistency=_build_entity_consistency(payload.get("entity_consistency")),
         discrepancies=_build_discrepancies(payload.get("discrepancies")),
         matched=_build_matched_fields(payload.get("matched", [])),
         error=payload.get("error"),
+        query_id=str(payload.get("query_id", "")),
+        reply_mode=_normalize_reply_mode(raw_reply_mode),
     )
 
     trace_id = str(payload.get("trace_id") or parsed.get("trace_id") or "")
@@ -302,6 +351,7 @@ async def run_root_cause_analysis(
     _ = ctx
 
     reconciliation_output, trace_id = _parse_reconciliation_output(reconciliation_data)
+    ctx.deps.current_reply_mode = reconciliation_output.reply_mode
     logger.info(
         f"run_root_cause_analysis started for entity={reconciliation_output.entity!r}"
     )
@@ -309,6 +359,7 @@ async def run_root_cause_analysis(
     message_id = getattr(ctx.deps, "current_message_id", None)
     if message_id:
         _rootcause_output_by_message_id[message_id] = output
+        _reply_mode_by_message_id[message_id] = reconciliation_output.reply_mode
 
     is_clean = (
         not output.error
@@ -330,10 +381,10 @@ async def run_root_cause_analysis(
         try:
             content = format_rootcause_reply(output)
             await ctx.deps.get_participants()
-            user_mentions = [
-                p["name"] for p in ctx.deps.participants
-                if p.get("type") == "User"
-            ]
+            user_mentions = _reply_mentions(
+                ctx.deps.participants,
+                reconciliation_output.reply_mode,
+            )
             if user_mentions:
                 await ctx.deps.send_message(content=content, mentions=user_mentions)
                 _replied_message_ids.add(message_id)
@@ -347,7 +398,7 @@ async def run_root_cause_analysis(
                 )
 
             logger.warning(
-                f"Clean-case deterministic reply found no user participants for "
+                f"Clean-case deterministic reply found no target participants for "
                 f"message_id={message_id!r}; falling through to LLM reply path"
             )
         except Exception as exc:
@@ -403,6 +454,8 @@ def _display_value(value: Any) -> str:
 def format_rootcause_reply(output: RootCauseOutput) -> str:
     entity = output.entity or "Unknown entity"
     lines = [f"**AuditFlow Root Cause Analysis — {entity}**", ""]
+    if output.query_id:
+        lines.extend([f"Query-ID: {output.query_id}", ""])
 
     if output.error:
         lines.extend([
@@ -466,13 +519,15 @@ async def _maybe_send_fallback_reply(
 
         content = format_rootcause_reply(output)
         await tools.get_participants()
-        user_mentions = [
-            p["name"] for p in tools.participants
-            if p.get("type") == "User"
-        ]
+        reply_mode = getattr(
+            tools,
+            "current_reply_mode",
+            _reply_mode_by_message_id.get(message_id, "user"),
+        )
+        user_mentions = _reply_mentions(tools.participants, reply_mode)
         if not user_mentions:
             logger.warning(
-                f"Fallback reply found no user participants for "
+                f"Fallback reply found no target participants for "
                 f"message_id={message_id!r}; reply was not sent"
             )
             return False
@@ -494,6 +549,7 @@ async def _maybe_send_fallback_reply(
 async def reply_to_user(
     ctx: RunContext[AgentToolsProtocol],
     content: str,
+    reply_mode: str = "user",
 ) -> str:
     """
     Send the final root cause analysis result back to the user in the room.
@@ -528,11 +584,9 @@ async def reply_to_user(
             "call reply_to_user again."
         )
 
+    effective_reply_mode = getattr(ctx.deps, "current_reply_mode", reply_mode)
     await ctx.deps.get_participants()
-    user_mentions = [
-        p["name"] for p in ctx.deps.participants
-        if p.get("type") == "User"
-    ]
+    user_mentions = _reply_mentions(ctx.deps.participants, effective_reply_mode)
     if not user_mentions:
         logger.warning("reply_to_user found no user participants; reply was not sent")
         return "Error: no user found in room to reply to."
@@ -587,24 +641,31 @@ class RootCauseAgent:
                 anomalies=[],
                 summary=ReconciliationSummary(),
                 trace_id=trace_id,
+                query_id=reconciliation_output.query_id,
                 error=reconciliation_output.error,
+                reply_mode=reconciliation_output.reply_mode,
             )
 
         llm_client = self._get_llm_client()
 
         try:
-            return run_root_cause_agent(
+            output = run_root_cause_agent(
                 reconciliation=reconciliation_output,
                 trace_id=trace_id,
                 llm_client=llm_client,
             )
+            output.reply_mode = reconciliation_output.reply_mode
+            output.query_id = reconciliation_output.query_id
+            return output
         except Exception as exc:
             return RootCauseOutput(
                 entity=reconciliation_output.entity,
                 anomalies=[],
                 summary=ReconciliationSummary(),
                 trace_id=trace_id,
+                query_id=reconciliation_output.query_id,
                 error=f"Root-Cause Agent failed: {exc}",
+                reply_mode=reconciliation_output.reply_mode,
             )
 
     def _get_llm_client(self) -> Optional[RootCauseLLMClient]:
@@ -665,7 +726,9 @@ class RootCauseOnlyAdapter(PydanticAIAdapter):
         message_id = msg.id
         _replied_message_ids.discard(message_id)
         _rootcause_output_by_message_id.pop(message_id, None)
+        _reply_mode_by_message_id.pop(message_id, None)
         tools.current_message_id = message_id
+        tools.current_reply_mode = _extract_reply_mode_from_text(msg.content)
 
         try:
             await super().on_message(
@@ -684,6 +747,7 @@ class RootCauseOnlyAdapter(PydanticAIAdapter):
             await _maybe_send_fallback_reply(tools, message_id)
         finally:
             _rootcause_output_by_message_id.pop(message_id, None)
+            _reply_mode_by_message_id.pop(message_id, None)
             _replied_message_ids.discard(message_id)
 
 

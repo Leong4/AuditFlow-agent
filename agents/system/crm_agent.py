@@ -42,20 +42,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 _processed_message_ids: set[str] = set()
 _active_message_ids_by_room: dict[str, str] = {}
-_query_context_by_message_id: dict[str, tuple[str, str, str]] = {}
+_query_context_by_message_id: dict[str, tuple[str, str, str, str]] = {}
 _replied_message_ids: set[str] = set()
 
 
-def _extract_router_query_context(content: str) -> tuple[str, str, str] | None:
+def _extract_reply_mode(content: str) -> str:
+    reply_mode_match = re.search(r"(?im)^Reply-Mode:\s*(.+)$", content)
+    if not reply_mode_match:
+        return "user"
+
+    reply_mode = reply_mode_match.group(1).strip().lower()
+    if reply_mode not in {"user", "agent"}:
+        logger.warning(f"Invalid Reply-Mode {reply_mode!r}; defaulting to 'user'")
+        return "user"
+
+    return reply_mode
+
+
+def _extract_router_query_context(content: str) -> tuple[str, str, str, str] | None:
     query_id_match = re.search(r"(?im)^Query-ID:\s*(.+)$", content)
     entity_match = re.search(r"(?im)^Entity:\s*(.+)$", content)
     time_scope_match = re.search(r"(?im)^Time scope:\s*(.+)$", content)
     if entity_match and time_scope_match:
         query_id = query_id_match.group(1).strip() if query_id_match else ""
+        reply_mode = _extract_reply_mode(content)
         return (
             entity_match.group(1).strip(),
             time_scope_match.group(1).strip(),
             query_id,
+            reply_mode,
         )
 
     legacy_match = re.search(
@@ -63,7 +78,7 @@ def _extract_router_query_context(content: str) -> tuple[str, str, str] | None:
         content.strip(),
     )
     if legacy_match:
-        return legacy_match.group(1).strip(), legacy_match.group(2).strip(), ""
+        return legacy_match.group(1).strip(), legacy_match.group(2).strip(), "", "user"
 
     return None
 
@@ -199,9 +214,10 @@ async def query_and_reply_crm(
         message_id = _active_message_ids_by_room.get(getattr(ctx.deps, "room_id", ""))
 
     query_id = ""
+    reply_mode = "user"
     query_context = _query_context_by_message_id.get(message_id or "")
     if query_context is not None:
-        entity, time_scope, query_id = query_context
+        entity, time_scope, query_id, reply_mode = query_context
 
     dedupe_key = message_id or f"{getattr(ctx.deps, 'room_id', 'unknown')}:{reply_target}"
     already_replied = dedupe_key in _replied_message_ids
@@ -214,6 +230,7 @@ async def query_and_reply_crm(
 
     result = build_crm_output(entity, time_scope)
     result.query_id = query_id
+    result.reply_mode = reply_mode
     def _enum_safe(obj):
         from enum import Enum
         if isinstance(obj, Enum):
@@ -327,7 +344,7 @@ class TaskOnlyAdapter(PydanticAIAdapter):
 
         if query_context is not None:
             _query_context_by_message_id[msg.id] = query_context
-            entity, time_scope, _ = query_context
+            entity, time_scope, _, _ = query_context
             tools.query_entity, tools.query_time_scope = entity, time_scope
         tools.current_message_id = msg.id
         tools.reply_target = msg.sender_name
