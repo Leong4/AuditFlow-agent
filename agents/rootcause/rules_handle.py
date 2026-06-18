@@ -133,17 +133,17 @@ def analyze_discrepancy(discrepancy: Discrepancy) -> AnomalyAnalysis:
 
 
 # ---------------------------------------------------------------------
-# Rule category checks 以下审计异常情况由代码直接判断
+# Rule category checks. The following audit exceptions are judged directly by code.
 # ---------------------------------------------------------------------
 
-# 判断id是否无法匹配
+# Determine whether IDs do not match.
 def is_id_mismatch(field_pair: str) -> bool:
     return any(
         key in field_pair
         for key in ["customer_id", "contract_id", "invoice_id", "payment_id"]
     )
 
-# 判断是否缺失字段，缺失直接判断异常。
+# Determine whether required fields are missing; missing fields are treated as anomalies.
 def is_missing_required_field(discrepancy: Discrepancy) -> bool:
     field_pair = (discrepancy.field_pair or "").lower()
 
@@ -158,21 +158,26 @@ def is_missing_required_field(discrepancy: Discrepancy) -> bool:
 
     return False
 
-# 判断是否有日期问题：逾期直接判定异常，否则返回发票时间、支付时间和预期时间
+# Determine whether there is a date issue: overdue cases are anomalous, otherwise
+# return invoice, payment, and expected timing signals.
 def is_date_issue(field_pair: str, values: dict[str, Any]) -> bool:
     if "date" in field_pair or "overdue" in field_pair:
         return True
 
     return has_any_key(values, ["invoice_date", "payment_date", "due_date"])
 
-# 判断公司名称问题，如果提供了实体差异，直接判定异常，否则返回公司名，匹配规则和置信度
+# Determine whether there is a company-name issue. If entity differences are
+# provided, treat them as anomalous; otherwise return company names, matching
+# rules, and confidence.
 def is_entity_issue(field_pair: str, values: dict[str, Any]) -> bool:
     if "entity" in field_pair or "name" in field_pair:
         return True
 
     return has_any_key(values, ["entity", "match_method", "confidence"])
 
-# 判断金额问题，如果不同系统中存在差异，直接判定异常，否则返回合同金额、支票金额、支付金额、税额减免、银行手续费、退款金额
+# Determine whether there is an amount issue. If systems differ, treat it as
+# anomalous; otherwise return contract amount, invoice amount, payment amount,
+# tax deduction, bank fee, and refund amount.
 def is_amount_issue(field_pair: str, values: dict[str, Any]) -> bool:
     if "amount" in field_pair or "payment" in field_pair or "invoice" in field_pair:
         return True
@@ -189,7 +194,8 @@ def is_amount_issue(field_pair: str, values: dict[str, Any]) -> bool:
         ],
     )
 
-# 判断汇率问题，存在汇率差异直接判定异常，否则返回汇率、原始货币金额、汇率日期和汇率政策。
+# Determine whether there is an FX issue. FX differences are anomalous; otherwise
+# return the exchange rate, original currency amount, exchange-rate date, and policy.
 def is_fx_issue(field_pair: str, values: dict[str, Any]) -> bool:
     if "fx" in field_pair or "exchange" in field_pair or "currency" in field_pair:
         return True
@@ -206,31 +212,31 @@ def is_fx_issue(field_pair: str, values: dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------
-# Handlers 分析原因
+# Handlers for cause analysis
 # ---------------------------------------------------------------------
 
-# 分析id异常原因：
+# Analyze ID mismatch causes.
 def analyze_id_mismatch(discrepancy: Discrepancy) -> AnomalyAnalysis:
     field_pair = (discrepancy.field_pair or "").lower()
     values = discrepancy.values or {}
 
-    # 金额和支票是否对应同一客户
+    # Whether the invoice and payment correspond to the same customer.
     if "customer_id" in field_pair:
         cause = "customer_id_mismatch"
         action = "Check whether the invoice or payment was linked to the wrong customer."
-    # 支票和支付记录是否对应同一合同
+    # Whether the invoice and payment record correspond to the same contract.
     elif "contract_id" in field_pair:
         cause = "contract_id_mismatch"
         action = "Check whether the ERP invoice or Finance payment was linked to the wrong contract."
-    # 支付记录是否对应错误的支票
+    # Whether the payment record corresponds to the wrong invoice.
     elif "invoice_id" in field_pair:
         cause = "invoice_id_mismatch"
         action = "Check whether the Finance payment was matched to the wrong ERP invoice."
-    # 检查付款记录是否重复或引用错误
+    # Check whether the payment record is duplicated or incorrectly referenced.
     elif "payment_id" in field_pair:
         cause = "payment_id_mismatch"
         action = "Check whether the payment record was duplicated or incorrectly referenced."
-    # 要求检查各系统中不一致的标识符
+    # Require checking inconsistent identifiers across systems.
     else:
         cause = "id_mismatch"
         action = "Check the inconsistent identifier across systems."
@@ -256,7 +262,7 @@ def analyze_id_mismatch(discrepancy: Discrepancy) -> AnomalyAnalysis:
         recommended_action=action,
     )
 
-# 分析缺失字段
+# Analyze missing fields.
 def analyze_missing_required_field(discrepancy: Discrepancy) -> AnomalyAnalysis:
     values = discrepancy.values or {}
 
@@ -292,7 +298,7 @@ def analyze_missing_required_field(discrepancy: Discrepancy) -> AnomalyAnalysis:
         ),
     )
 
-# 分析日期问题
+# Analyze date issues.
 def analyze_date_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
     values = discrepancy.values or {}
 
@@ -312,7 +318,7 @@ def analyze_date_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
         f"Field pair: {discrepancy.field_pair}",
         f"Values: {values}",
     ]
-    # 财务付款日期早于ERP发票日期
+    # Finance payment date is earlier than the ERP invoice date.
     if invoice_date and payment_date and payment_date < invoice_date:
         evidence.append("Finance payment_date is earlier than ERP invoice_date.")
 
@@ -332,13 +338,13 @@ def analyze_date_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
                 "Verify whether the payment was linked to the correct invoice and check the recorded payment date."
             ),
         )
-    # 支付逾期
+    # Payment is overdue.
     if due_date and payment_date and payment_date > due_date:
         if overdue_days is None:
             overdue_days = (payment_date - due_date).days
 
         evidence.append(f"Payment is {overdue_days} days after due_date.")
-        # 预期天数在宽限期限
+        # Overdue days are within the grace period.
         if grace_days is not None and overdue_days <= grace_days:
             evidence.append(
                 f"Overdue days are within the grace period of {grace_days} days."
@@ -386,7 +392,7 @@ def analyze_date_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
         ),
     )
 
-# 分析公司名称问题
+# Analyze company-name issues.
 def analyze_entity_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
     values = discrepancy.values or {}
 
@@ -406,7 +412,7 @@ def analyze_entity_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
     if match_method in {"exact", "alias", "fuzzy"} and confidence is not None:
         evidence.append(f"Entity match method is {match_method}.")
         evidence.append(f"Entity match confidence is {confidence}.")
-        # 存在匹配方法，并且置信度大于0.95，无异常。
+        # A matching method exists and confidence is above 0.95, so there is no anomaly.
         if match_method in {"exact", "alias"} and confidence >= 0.95:
             return AnomalyAnalysis(
                 field_pair=discrepancy.field_pair,
@@ -421,7 +427,7 @@ def analyze_entity_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
                     "No action required. Keep the alias or exact-match evidence for audit trail."
                 ),
             )
-        # 无匹配方法，置信度大于0.85，要求用户检查
+        # No strong matching method, but confidence is above 0.85, so ask the user to verify.
         if confidence >= 0.85:
             return AnomalyAnalysis(
                 field_pair=discrepancy.field_pair,
@@ -457,7 +463,7 @@ def analyze_entity_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
         ),
     )
 
-# 分析金额问题
+# Analyze amount issues.
 def analyze_amount_issue(discrepancy: Discrepancy) -> AnomalyAnalysis:
     values = discrepancy.values or {}
     field_pair = (discrepancy.field_pair or "").lower()

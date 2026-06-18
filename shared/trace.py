@@ -1,22 +1,23 @@
 """
-AuditFlow - Decision Trace（可审计决策链）
-==========================================
-记录整个对账流程中每个 Agent 的每一步决策。
+AuditFlow - Decision Trace (auditable decision chain)
+=====================================================
+Records every decision made by each Agent throughout the reconciliation flow.
 
-这是 AuditFlow 的核心差异化功能：
-- 普通 AI：给你一个结论，不知道怎么来的
-- AuditFlow：每一步推理都有记录，出错时精确定位是哪个 Agent 的哪一步出了问题
+This is a key differentiator for AuditFlow:
+- A generic AI returns a conclusion without showing how it got there.
+- AuditFlow records each reasoning step, so failures can be traced to the
+  exact Agent and step that caused the issue.
 
-使用方式：
+Usage:
     from shared.trace import AuditTrace, TraceStep, new_trace, add_step, finish_trace
 
-典型流程：
-    trace = new_trace(entity="Acme Corp", raw_query="为什么合同和到账对不上？")
+Typical flow:
+    trace = new_trace(entity="Acme Corp", raw_query="Why do the contract and payment not match?")
     add_step(trace, TraceStep(agent="router", ...))
     add_step(trace, TraceStep(agent="crm_agent", ...))
     ...
     finish_trace(trace)
-    print(trace.to_dict())  # 输出完整 JSON
+    print(trace.to_dict())  # Output the full JSON
 """
 
 from dataclasses import dataclass, field
@@ -26,27 +27,27 @@ import uuid
 
 
 # ─────────────────────────────────────────────
-# 单步 Trace
+# Single Trace Step
 # ─────────────────────────────────────────────
 
 @dataclass
 class TraceStep:
     """
-    单个 Agent 的单次决策记录。
-    每个 Agent 执行完后往 trace 里加一条。
+    A single decision record from one Agent.
+    Each Agent appends one step after it finishes.
     """
-    agent: str          # agent 名称，例如 "router", "crm_agent", "reconciliation", "root_cause"
-    layer: str          # 所在层，例如 "routing", "data", "analysis", "diagnosis"
-    decision: str       # 这一步做了什么决定，一句话描述
-    reason: str = ""    # 为什么这么决定（推理依据）
+    agent: str          # Agent name, e.g. "router", "crm_agent", "reconciliation", "root_cause"
+    layer: str          # Layer, e.g. "routing", "data", "analysis", "diagnosis"
+    decision: str       # One-sentence description of the decision made in this step
+    reason: str = ""    # Rationale for the decision
 
-    # 可选补充字段（不同 agent 填不同的）
-    confidence: Optional[float] = None         # 置信度，0.0 ~ 1.0
-    data_freshness: Optional[str] = None       # 数据截止日期，System Agent 填
-    rules_reported: list[str] = field(default_factory=list)    # 报告的业务规则，System Agent 填
-    discrepancies_found: int = 0               # 发现的差异数量，Reconciliation Agent 填
-    anomaly_status: Optional[str] = None       # 判定结果，Root-Cause Agent 填
-    error: Optional[str] = None                # 如果这步出错了，记录错误信息
+    # Optional supplemental fields filled by different agents.
+    confidence: Optional[float] = None         # Confidence score, 0.0 to 1.0
+    data_freshness: Optional[str] = None       # Data cutoff date, filled by System Agents
+    rules_reported: list[str] = field(default_factory=list)    # Business rules reported by System Agents
+    discrepancies_found: int = 0               # Number of discrepancies found by Reconciliation Agent
+    anomaly_status: Optional[str] = None       # Judgment produced by Root-Cause Agent
+    error: Optional[str] = None                # Error details if this step failed
 
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -55,24 +56,24 @@ class TraceStep:
 
 
 # ─────────────────────────────────────────────
-# 完整 Trace
+# Complete Trace
 # ─────────────────────────────────────────────
 
 @dataclass
 class AuditTrace:
     """
-    一次完整对账请求的决策链。
-    包含从用户提问到最终结论的所有步骤。
+    Decision chain for a complete reconciliation request.
+    Includes every step from the user's question to the final conclusion.
     """
-    trace_id: str                               # 唯一 ID，自动生成
-    entity: str                                 # 被查询的客户/公司名称
-    raw_query: str                              # 用户原始问题
+    trace_id: str                               # Unique ID, generated automatically
+    entity: str                                 # Queried customer/company name
+    raw_query: str                              # Original user question
 
     steps: list[TraceStep] = field(default_factory=list)
 
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: Optional[str] = None
-    total_duration_ms: Optional[int] = None     # 整体耗时（毫秒）
+    total_duration_ms: Optional[int] = None     # Total elapsed time in milliseconds
     status: str = "in_progress"                 # "in_progress" | "completed" | "failed"
 
     def to_dict(self) -> dict:
@@ -89,16 +90,16 @@ class AuditTrace:
 
 
 # ─────────────────────────────────────────────
-# 工具函数（队友直接调用这些）
+# Helper functions for direct use by teammates
 # ─────────────────────────────────────────────
 
 def new_trace(entity: str, raw_query: str) -> AuditTrace:
     """
-    开始一次新的对账追踪。
-    在 Router Agent 收到用户问题时调用。
+    Start a new reconciliation trace.
+    Called when the Router Agent receives a user question.
 
-    示例：
-        trace = new_trace(entity="Acme Corp", raw_query="为什么合同和到账对不上？")
+    Example:
+        trace = new_trace(entity="Acme Corp", raw_query="Why do the contract and payment not match?")
     """
     return AuditTrace(
         trace_id=f"audit_{uuid.uuid4().hex[:8]}",
@@ -109,14 +110,14 @@ def new_trace(entity: str, raw_query: str) -> AuditTrace:
 
 def add_step(trace: AuditTrace, step: TraceStep) -> None:
     """
-    往 trace 里加一步。
-    每个 Agent 执行完后调用一次。
+    Add one step to the trace.
+    Called once after each Agent finishes.
 
-    示例：
+    Example:
         add_step(trace, TraceStep(
             agent="crm_agent",
             layer="data",
-            decision="返回合同数据 + 付款条款",
+            decision="Return contract data and payment terms",
             data_freshness="2026-03-31",
             rules_reported=["payment_terms: 3 installments 40%+40%+20%"],
         ))
@@ -126,10 +127,10 @@ def add_step(trace: AuditTrace, step: TraceStep) -> None:
 
 def finish_trace(trace: AuditTrace) -> None:
     """
-    标记 trace 完成，计算总耗时。
-    在 Root-Cause Agent 输出最终结论后调用。
+    Mark the trace as complete and calculate total elapsed time.
+    Called after the Root-Cause Agent outputs the final conclusion.
 
-    示例：
+    Example:
         finish_trace(trace)
         print(trace.to_dict())
     """
@@ -144,11 +145,11 @@ def finish_trace(trace: AuditTrace) -> None:
 
 def fail_trace(trace: AuditTrace, reason: str) -> None:
     """
-    标记 trace 失败。
-    任何 Agent 遇到无法恢复的错误时调用。
+    Mark the trace as failed.
+    Called when any Agent encounters an unrecoverable error.
 
-    示例：
-        fail_trace(trace, reason="CRM Agent 查询超时")
+    Example:
+        fail_trace(trace, reason="CRM Agent query timed out")
     """
     trace.finished_at = datetime.now(timezone.utc).isoformat()
     trace.status = "failed"

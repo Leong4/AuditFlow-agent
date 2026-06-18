@@ -4,7 +4,7 @@ from pathlib import Path
 from agents.rootcause.llm_client import RootCauseLLMClient
 
 """
-    测试用例：
+    Test case:
     CRM contract_amount = 150000
     ERP invoice_amount = 60000
     Finance payment_amount = 60000

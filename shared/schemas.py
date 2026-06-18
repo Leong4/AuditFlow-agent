@@ -1,12 +1,13 @@
 """
-AuditFlow - Agent 输入/输出契约
-================================
-这个文件是所有 agent 之间的"格式合同"。
-- 只有阿恆能修改这个文件
-- 队友直接 import 使用，不要自己定义格式
-- 有任何改动需求请在群里说，阿恆统一修改
+AuditFlow - Agent input/output contracts
+========================================
+This file is the shared "format contract" between all agents.
+- Only Ah Hang should modify this file.
+- Teammates should import and use these definitions directly instead of
+  redefining their own formats.
+- Raise any requested changes in the group so Ah Hang can update them centrally.
 
-使用方式:
+Usage:
     from shared.schemas import RouterOutput, CRMOutput, ReconciliationOutput, RootCauseOutput
 """
 
@@ -16,19 +17,19 @@ from enum import Enum
 
 
 # ─────────────────────────────────────────────
-# 共用枚举
+# Shared enums
 # ─────────────────────────────────────────────
 
 class QueryType(str, Enum):
-    FACT_LOOKUP     = "fact_lookup"      # 单系统事实查询
-    RECONCILIATION  = "reconciliation"   # 跨系统对账
-    ANOMALY_CHECK   = "anomaly_check"    # 异常归因分析
+    FACT_LOOKUP     = "fact_lookup"      # Single-system fact lookup
+    RECONCILIATION  = "reconciliation"   # Cross-system reconciliation
+    ANOMALY_CHECK   = "anomaly_check"    # Anomaly root-cause analysis
 
 
 class AnomalyStatus(str, Enum):
-    NORMAL  = "normal"   # 差异可被业务规则完全解释
-    ANOMALY = "anomaly"  # 差异无法被任何已知规则解释，需人工介入
-    WATCH   = "watch"    # 差异可能合理，需后续跟进确认
+    NORMAL  = "normal"   # Difference is fully explained by business rules
+    ANOMALY = "anomaly"  # Difference cannot be explained by known rules and needs human review
+    WATCH   = "watch"    # Difference may be reasonable but needs follow-up confirmation
 
 
 class RiskLevel(str, Enum):
@@ -50,57 +51,59 @@ class MatchMethod(str, Enum):
 @dataclass
 class RouterOutput:
     """
-    Router Agent 的输出。
-    后续所有 System Agent 的输入都基于这个结构。
+    Output from the Router Agent.
+    All downstream System Agent inputs are based on this structure.
     """
-    query_type: QueryType               # 查询类型
-    entity: str                         # 客户/公司名称，例如 "Acme Corp"
-    fields_to_compare: list[str]        # 需要对比的字段，例如 ["contract_amount", "invoice_amount"]
-    time_scope: str                     # 时间范围，例如 "Q1 2026"
-    systems_needed: list[str]           # 需要查询的系统，例如 ["crm", "erp", "finance"]
-    raw_query: str = ""                 # 用户原始问题，保留用于 trace
+    query_type: QueryType               # Query type
+    entity: str                         # Customer/company name, e.g. "Acme Corp"
+    fields_to_compare: list[str]        # Fields to compare, e.g. ["contract_amount", "invoice_amount"]
+    time_scope: str                     # Time range, e.g. "Q1 2026"
+    systems_needed: list[str]           # Systems to query, e.g. ["crm", "erp", "finance"]
+    raw_query: str = ""                 # Original user question, retained for trace
 
 
 # ─────────────────────────────────────────────
-# Layer 2: System Agents（CRM / ERP / Finance）
+# Layer 2: System Agents (CRM / ERP / Finance)
 # ─────────────────────────────────────────────
 
 @dataclass
 class EntityMatch:
     """
-    实体匹配结果——记录查询名称和实际匹配名称的差异。
-    用于解决不同系统中客户名称格式不一致的问题。
+    Entity matching result, recording the difference between the queried name
+    and the actual matched name.
+    Used to handle customer name format differences across systems.
     """
-    query: str                  # Router 传入的查询名称，例如 "Acme Corp"
-    matched_as: str             # 数据库里实际的名称，例如 "Acme Corporation"
-    match_method: MatchMethod   # 匹配方式
-    confidence: float           # 匹配置信度，0.0 ~ 1.0
+    query: str                  # Query name passed by Router, e.g. "Acme Corp"
+    matched_as: str             # Actual name in the database, e.g. "Acme Corporation"
+    match_method: MatchMethod   # Matching method
+    confidence: float           # Matching confidence, 0.0 to 1.0
 
 
 @dataclass
 class CRMOutput:
     """
-    CRM Agent 的输出。
-    只报告合同事实和 CRM 系统的业务规则，不做跨系统判断。
+    Output from the CRM Agent.
+    Reports only contract facts and CRM business rules; does not make
+    cross-system judgments.
     """
     system: str = "crm"
     entity: str = ""
     entity_match: Optional[EntityMatch] = None
 
-    # 合同数据
+    # Contract data
     contract_amount: Optional[float] = None
     currency: str = "GBP"
-    sign_date: str = ""             # ISO 格式，例如 "2026-01-15"
-    status: str = ""                # 合同状态，例如 "active"
+    sign_date: str = ""             # ISO format, e.g. "2026-01-15"
+    status: str = ""                # Contract status, e.g. "active"
     sales_owner: str = ""
 
-    # CRM 系统业务规则（这些规则跟数据一起走，不单独抽离）
-    payment_terms: str = ""             # 例如 "3 installments: 40%, 40%, 20%"
-    exchange_rate_policy: str = ""      # 例如 "rate at sign date"
-    late_payment_grace_period: str = "" # 例如 "15 days"
+    # CRM business rules. These rules travel with the data instead of being separated out.
+    payment_terms: str = ""             # E.g. "3 installments: 40%, 40%, 20%"
+    exchange_rate_policy: str = ""      # E.g. "rate at sign date"
+    late_payment_grace_period: str = "" # E.g. "15 days"
 
-    data_freshness: str = ""        # 数据截止日期，例如 "2026-03-31"
-    error: Optional[str] = None     # 查询失败时填写错误信息
+    data_freshness: str = ""        # Data cutoff date, e.g. "2026-03-31"
+    error: Optional[str] = None     # Error details when a query fails
     customer_id: str = ""
     contract_id: str = ""
     query_id: str = ""
@@ -110,24 +113,24 @@ class CRMOutput:
 @dataclass
 class ERPOutput:
     """
-    ERP Agent 的输出。
-    只报告发票事实和 ERP 系统的业务规则。
+    Output from the ERP Agent.
+    Reports only invoice facts and ERP business rules.
     """
     system: str = "erp"
     entity: str = ""
     entity_match: Optional[EntityMatch] = None
 
-    # 发票数据
+    # Invoice data
     invoice_id: str = ""
     invoice_amount: Optional[float] = None
     currency: str = "GBP"
-    invoice_date: str = ""          # ISO 格式
-    due_date: str = ""              # 应付日期
-    delivery_status: str = ""       # 交付状态，例如 "delivered"
-    installment_number: Optional[int] = None  # 当前是第几期
+    invoice_date: str = ""          # ISO format
+    due_date: str = ""              # Due date
+    delivery_status: str = ""       # Delivery status, e.g. "delivered"
+    installment_number: Optional[int] = None  # Current installment number
 
-    # ERP 系统业务规则
-    invoice_rules: str = ""         # 例如 "net 30 days from invoice_date"
+    # ERP business rules
+    invoice_rules: str = ""         # E.g. "net 30 days from invoice_date"
 
     data_freshness: str = ""
     error: Optional[str] = None
@@ -140,26 +143,26 @@ class ERPOutput:
 @dataclass
 class FinanceOutput:
     """
-    Finance Agent 的输出。
-    只报告回款事实和 Finance 系统的业务规则。
+    Output from the Finance Agent.
+    Reports only payment facts and Finance business rules.
     """
     system: str = "finance"
     entity: str = ""
     entity_match: Optional[EntityMatch] = None
 
-    # 回款数据
+    # Payment data
     payment_id: str = ""
     payment_amount: Optional[float] = None
     currency: str = "GBP"
-    payment_date: str = ""          # ISO 格式
-    payment_method: str = ""        # 例如 "bank_transfer"
+    payment_date: str = ""          # ISO format
+    payment_method: str = ""        # E.g. "bank_transfer"
     exchange_rate: Optional[float] = None
     refund_amount: float = 0.0
     tax_deduction: float = 0.0
     overdue_days: int = 0
 
-    # Finance 系统业务规则
-    exchange_rate_policy: str = ""  # 例如 "rate at sign date"
+    # Finance business rules
+    exchange_rate_policy: str = ""  # E.g. "rate at sign date"
 
     data_freshness: str = ""
     error: Optional[str] = None
@@ -180,19 +183,20 @@ class FinanceOutput:
 @dataclass
 class Discrepancy:
     """
-    单条差异记录。
-    只描述"哪里不一样、差多少、谁高谁低"，不解释原因。
+    A single discrepancy record.
+    Describes only what differs, by how much, and which side is higher or lower;
+    it does not explain the reason.
     """
-    field_pair: str             # 例如 "contract_amount vs invoice_amount"
-    values: dict                # 例如 {"crm": 120000, "erp": 96000}
-    difference: float           # 差值（绝对值）
-    direction: str              # 例如 "erp_lower" 或 "finance_lower"
+    field_pair: str             # E.g. "contract_amount vs invoice_amount"
+    values: dict                # E.g. {"crm": 120000, "erp": 96000}
+    difference: float           # Difference as an absolute value
+    direction: str              # E.g. "erp_lower" or "finance_lower"
 
 
 @dataclass
 class MatchedField:
     """
-    各系统间一致的字段记录。
+    Record of a field that is consistent across systems.
     """
     field: str
     value: object
@@ -203,21 +207,21 @@ class MatchedField:
 @dataclass
 class EntityConsistency:
     """
-    跨系统实体名称一致性结果。
+    Cross-system entity name consistency result.
     """
     crm: str = ""
     erp: str = ""
     finance: str = ""
     aligned_name: str = ""
-    alignment_method: str = ""  # 例如 "fuzzy match + manual alias table"
+    alignment_method: str = ""  # E.g. "fuzzy match + manual alias table"
 
 
 @dataclass
 class ReconciliationOutput:
     """
-    Reconciliation Agent 的输出。
-    职责边界：只发现差异，不解释差异。
-    Root-Cause Agent 才负责解释。
+    Output from the Reconciliation Agent.
+    Responsibility boundary: finds discrepancies only and does not explain them.
+    The Root-Cause Agent is responsible for explanations.
     """
     entity: str = ""
     entity_consistency: Optional[EntityConsistency] = None
@@ -235,13 +239,13 @@ class ReconciliationOutput:
 @dataclass
 class AnomalyAnalysis:
     """
-    单条差异的归因分析结果。
+    Root-cause analysis result for a single discrepancy.
     """
-    field_pair: str                     # 对应 Discrepancy.field_pair
-    probable_cause: str                 # 主要原因，例如 "installment_schedule"
-    confidence: float                   # 置信度，0.0 ~ 1.0
-    evidence: list[str] = field(default_factory=list)       # 支撑证据列表
-    alternative_causes: list[dict] = field(default_factory=list)  # 备选原因
+    field_pair: str                     # Corresponds to Discrepancy.field_pair
+    probable_cause: str                 # Primary cause, e.g. "installment_schedule"
+    confidence: float                   # Confidence score, 0.0 to 1.0
+    evidence: list[str] = field(default_factory=list)       # Supporting evidence list
+    alternative_causes: list[dict] = field(default_factory=list)  # Alternative causes
 
     status: AnomalyStatus = AnomalyStatus.WATCH
     risk_level: RiskLevel = RiskLevel.MEDIUM
@@ -252,7 +256,7 @@ class AnomalyAnalysis:
 @dataclass
 class ReconciliationSummary:
     """
-    整体对账摘要统计。
+    Overall reconciliation summary statistics.
     """
     total_discrepancies: int = 0
     normal: int = 0
@@ -263,13 +267,14 @@ class ReconciliationSummary:
 @dataclass
 class RootCauseOutput:
     """
-    Root-Cause Agent 的输出。
-    职责：解释差异 + 输出证据链 + 风险判定 + 行动建议。
+    Output from the Root-Cause Agent.
+    Responsibilities: explain discrepancies, output evidence chains, assess risk,
+    and recommend actions.
     """
     entity: str = ""
     anomalies: list[AnomalyAnalysis] = field(default_factory=list)
     summary: Optional[ReconciliationSummary] = None
-    trace_id: str = ""              # 对应 trace.py 里的 trace_id
+    trace_id: str = ""              # Corresponds to trace_id in trace.py
     query_id: str = ""
     error: Optional[str] = None
     reply_mode: str = "user"

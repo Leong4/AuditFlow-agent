@@ -1,6 +1,7 @@
-# Reconciliation Agent 核心逻辑文件
-# 职责边界：只发现跨系统字段是否一致或存在差异，不负责解释差异原因。
-# 后续再由Root-Cause Agent 做原因分析和风险判断。
+# Core logic for the Reconciliation Agent.
+# Responsibility boundary: only detects whether cross-system fields are consistent
+# or discrepant; it does not explain discrepancy causes.
+# Root-Cause Agent handles cause analysis and risk judgment later.
 
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ from thenvoi import Agent
 from thenvoi.core.protocols import AgentToolsProtocol
 from thenvoi.core.types import PlatformMessage
 
-# ── 路径设置 ──────────────────────────────────────────────
-# 让 Python 能找到 shared/ 目录
+# ── Path setup ──────────────────────────────────────────────
+# Ensure Python can find the shared/ directory.
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -119,7 +120,7 @@ Wrong example (do not produce this):
 """
 
 
-# ── Band 输入解析工具 ─────────────────────────────────────
+# ── Band input parsing utilities ─────────────────────────────────────
 
 def _json_safe(obj: Any) -> Any:
     if is_dataclass(obj):
@@ -359,7 +360,7 @@ def _parse_system_output(
     return _build_system_output(payload, output_type, system)
 
 
-# ── Tool 定义 ─────────────────────────────────────────────
+# ── Tool definitions ─────────────────────────────────────────────
 
 async def run_reconciliation(
     ctx: RunContext[AgentToolsProtocol],
@@ -490,7 +491,7 @@ async def reply_to_user(
     return f"Sent to user(s): {user_mentions}"
 
 
-# 将已经确认一致的字段加入 matched 列表，方便最终输出统一管理。
+# Add confirmed consistent fields to the matched list for unified final output.
 def _add_matched(matched: list[MatchedField], field: str, value, note: str = "") -> None:
     matched.append(MatchedField(
         field=field,
@@ -500,8 +501,9 @@ def _add_matched(matched: list[MatchedField], field: str, value, note: str = "")
     ))
 
 
-# 将发现的差异加入 discrepancies 列表。
-# difference 统一取绝对值，direction 用来说明是哪一边偏高、偏低或不一致。
+# Add discovered discrepancies to the discrepancies list.
+# Always store difference as an absolute value; direction indicates which side
+# is higher, lower, or inconsistent.
 def _add_discrepancy(
     discrepancies: list[Discrepancy],
     field_pair: str,
@@ -517,8 +519,8 @@ def _add_discrepancy(
     ))
 
 
-# 将 ISO 日期字符串转换为 date 对象。
-# 如果字段为空或格式不合法，返回 None，避免日期比较时报错。
+# Convert an ISO date string to a date object.
+# Return None for empty or invalid values to avoid date comparison errors.
 def _parse_date(value: str) -> date | None:
     if not value:
         return None
@@ -528,12 +530,12 @@ def _parse_date(value: str) -> date | None:
     except ValueError:
         return None
 
-# 金额比较时允许极小误差，主要用于 FX 换算后的浮点数比较。
+# Allow a tiny tolerance in amount comparisons, mainly for floats after FX conversion.
 def _amounts_close(left: float, right: float, tolerance: float = 0.01) -> bool:
     return abs(left - right) <= tolerance
 
-# 检查三个系统输出中是否缺少关键字段。
-# 如果关键字段缺失，Reconciliation 不应该强行判断为 clean。
+# Check whether key fields are missing from the three system outputs.
+# If key fields are missing, Reconciliation should not force a clean judgment.
 def _check_required_fields(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -596,8 +598,9 @@ def _check_required_fields(
         )
 
 
-# 检查 entity_match 的置信度。
-# 如果某个系统缺少 entity_match，或匹配置信度过低，就记录为潜在匹配问题。
+# Check the confidence of entity_match.
+# If a system lacks entity_match or has low matching confidence, record a
+# potential matching issue.
 def _check_entity_match_confidence(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -637,8 +640,8 @@ def _check_entity_match_confidence(
         )
 
 
-# 检查日期相关信号，例如付款日期是否早于发票日期、是否逾期。
-# 这里仍然只记录差异，不解释具体业务原因。
+# Check date-related signals, such as whether payment predates the invoice or is overdue.
+# This still records discrepancies only and does not explain business causes.
 def _check_date_signals(
     erp: ERPOutput,
     finance: FinanceOutput,
@@ -673,8 +676,9 @@ def _check_date_signals(
             direction="payment_overdue"
         )
 
-# 判断当前记录是否属于 FX 换算场景。
-# 条件：ERP 与 Finance 币种不同，并且 Finance 提供了原币金额和汇率。
+# Determine whether the current record is an FX conversion scenario.
+# Condition: ERP and Finance currencies differ, and Finance provides the original
+# currency amount and exchange rate.
 def _is_fx_conversion_case(erp: ERPOutput, finance: FinanceOutput) -> bool:
     return (
         erp.currency != finance.currency
@@ -683,9 +687,11 @@ def _is_fx_conversion_case(erp: ERPOutput, finance: FinanceOutput) -> bool:
     )
 
 
-# 处理 FX 换算金额对账。
-# 如果是 FX 场景，则用 original_currency_amount 和 exchange_rate 计算应收金额。
-# 返回 True 表示 FX 逻辑已经处理完，不再继续普通同币种金额比较。
+# Handle FX conversion amount reconciliation.
+# For FX scenarios, calculate the expected receivable amount from
+# original_currency_amount and exchange_rate.
+# Return True when FX logic has fully handled the case, so normal same-currency
+# amount comparison should not continue.
 def _compare_fx_amounts(
     erp: ERPOutput,
     finance: FinanceOutput,
@@ -760,8 +766,9 @@ def _compare_fx_amounts(
 
     return True
 
-# 检查 customer_id 和 contract_id 是否在 CRM、ERP、Finance 三个系统中一致。
-# 这比只看公司名更可靠，可以发现客户或合同被错误匹配的情况。
+# Check whether customer_id and contract_id are consistent across CRM, ERP, and Finance.
+# This is more reliable than company name alone and can reveal incorrectly
+# matched customers or contracts.
 def _check_customer_and_contract_ids(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -816,8 +823,9 @@ def _check_customer_and_contract_ids(
             )
 
 
-# 检查 ERP 发票 ID 与 Finance 付款记录中的 invoice_id 是否一致。
-# 即使金额一致，如果 invoice_id 不一致，也说明付款可能关联到了错误发票。
+# Check whether the ERP invoice ID matches the invoice_id in the Finance payment record.
+# Even when amounts match, an invoice_id mismatch suggests the payment may be
+# linked to the wrong invoice.
 def _check_invoice_linking(
     erp: ERPOutput,
     finance: FinanceOutput,
@@ -845,8 +853,9 @@ def _check_invoice_linking(
             )
 
 
-# 比较三个系统的币种。
-# 如果 CRM/ERP 使用原始发票币种，而 Finance 使用换算后的付款币种，则交给 FX 逻辑处理。
+# Compare currencies across the three systems.
+# If CRM/ERP use the original invoice currency while Finance uses the converted
+# payment currency, delegate to FX logic.
 def _compare_currency(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -889,8 +898,9 @@ def _compare_currency(
         )
 
 
-# 比较合同金额、发票金额和财务回款金额。
-# 这里包含分期付款、税款扣除、银行手续费、退款和 FX 换算等基础规则。
+# Compare contract amount, invoice amount, and Finance payment amount.
+# Includes basic rules for installments, tax deductions, bank fees, refunds,
+# and FX conversion.
 def _compare_amounts(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -1000,7 +1010,7 @@ def _compare_amounts(
             )
 
 
-# 构造实体一致性摘要，用于记录三个系统中的实体名称和最终对齐名称。
+# Build an entity consistency summary recording names from the three systems and the final aligned name.
 def _build_entity_consistency(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -1082,8 +1092,8 @@ def _derive_reply_mode(
     return reply_modes[0]
 
 
-# Reconciliation Agent 的主入口函数。
-# 输入三个系统的结构化输出，返回 ReconciliationOutput。
+# Main entry point for the Reconciliation Agent.
+# Takes structured outputs from the three systems and returns ReconciliationOutput.
 def reconcile(
     crm: CRMOutput,
     erp: ERPOutput,
@@ -1163,13 +1173,14 @@ def reconcile(
         )
 
 
-# 从 payment_terms 文本中提取百分比，用于分期付款金额计算。
+# Extract percentages from payment_terms text for installment amount calculation.
 def _extract_installment_percentages(payment_terms: str) -> list[float]:
     matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", payment_terms)
     return [float(value) / 100 for value in matches]
 
 
-# 根据合同总金额、付款条款和当前期数，计算当前期理论应开票金额。
+# Calculate the expected invoice amount for the current installment from the
+# total contract amount, payment terms, and installment number.
 def _expected_installment_amount(
     contract_amount: float,
     payment_terms: str,
@@ -1191,7 +1202,7 @@ def _expected_installment_amount(
     return contract_amount * percentages[index]
 
 
-# ── Agent 启动 ────────────────────────────────────────────
+# ── Agent startup ────────────────────────────────────────────
 
 class ReconOnlyAdapter(PydanticAIAdapter):
     def _create_agent(self):

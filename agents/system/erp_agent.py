@@ -1,14 +1,14 @@
 """
 AuditFlow - ERP Agent
 ======================
-负责查询 ERP mock 数据库，返回发票数据和业务规则。
+Queries the ERP mock database and returns invoice data and business rules.
 
-职责边界：
-- 只报告 ERP 系统里的事实和规则
-- 不做跨系统判断
-- 找不到记录时返回 error 字段
+Responsibility boundary:
+- Report only facts and rules from the ERP system.
+- Do not make cross-system judgments.
+- Return the error field when no record is found.
 
-运行方式：
+Run with:
     python3 agents/system/erp_agent.py
 """
 
@@ -29,8 +29,8 @@ from thenvoi import Agent
 from thenvoi.core.protocols import AgentToolsProtocol
 from thenvoi.core.types import PlatformMessage
 
-# ── 路径设置 ──────────────────────────────────────────────
-# 让 Python 能找到 shared/ 目录
+# ── Path setup ──────────────────────────────────────────────
+# Ensure Python can find the shared/ directory.
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -113,7 +113,7 @@ def _is_valid_router_system_query(content: str, own_system: str) -> bool:
     requested_systems = _extract_requested_systems(content)
     return own_system in requested_systems
 
-# ── Mock 数据加载 ─────────────────────────────────────────
+# ── Mock data loading ─────────────────────────────────────────
 DATA_PATH = ROOT / "data" / "erp_mock.json"
 
 def load_erp_data() -> list[dict]:
@@ -123,16 +123,16 @@ def load_erp_data() -> list[dict]:
 ERP_RECORDS = load_erp_data()
 
 
-# ── 查询函数 ──────────────────────────────────────────────
+# ── Query functions ──────────────────────────────────────────────
 
 def find_erp_record(entity: str, time_scope: str) -> dict | None:
     """
-    在 mock 数据里找匹配的 ERP 记录。
-    先做精确匹配，再做模糊匹配（包含关系）。
+    Find a matching ERP record in the mock data.
+    Try exact matching first, then fuzzy matching by containment.
     """
     entity_lower = entity.lower().strip()
 
-    # 精确匹配
+    # Exact match
     for record in ERP_RECORDS:
         meta = record["metadata"]
         payload = record["payload"]
@@ -142,7 +142,7 @@ def find_erp_record(entity: str, time_scope: str) -> dict | None:
         ):
             return record
 
-    # 模糊匹配（名称包含关系）
+    # Fuzzy match by name containment
     for record in ERP_RECORDS:
         meta = record["metadata"]
         payload = record["payload"]
@@ -158,7 +158,7 @@ def find_erp_record(entity: str, time_scope: str) -> dict | None:
 
 def build_erp_output(entity: str, time_scope: str) -> ERPOutput:
     """
-    查询 mock 数据，返回 ERPOutput 对象。
+    Query the mock data and return an ERPOutput object.
     """
     record = find_erp_record(entity, time_scope)
 
@@ -272,7 +272,7 @@ Report ONLY what the ERP system contains. Do NOT make cross-system judgments.
 """
 
 
-# ── Tool 定义 ─────────────────────────────────────────────
+# ── Tool definitions ─────────────────────────────────────────────
 
 def query_erp(
     ctx: RunContext[AgentToolsProtocol],
@@ -293,7 +293,7 @@ def query_erp(
     return json.dumps(result.__dict__, default=str, ensure_ascii=False, indent=2)
 
 
-# ── Agent 启动 ────────────────────────────────────────────
+# ── Agent startup ────────────────────────────────────────────
 
 class TaskOnlyAdapter(PydanticAIAdapter):
     def _create_agent(self):

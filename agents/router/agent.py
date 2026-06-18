@@ -118,7 +118,7 @@ PENDING_QUERY_TTL_SECONDS = int(
     os.getenv("ROUTER_PENDING_QUERY_TTL_SECONDS", "60")
 )
 
-##加入 pending query timeout 机制，用于防止单次 query 在部分 System Agent 不返回时永久等待
+## Add a pending-query timeout to prevent one query from waiting forever when some System Agents do not respond.
 def cleanup_stale_pending_queries_locked() -> None:
     """
     Remove pending queries that have been waiting too long.
