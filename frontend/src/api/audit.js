@@ -111,6 +111,161 @@ const MOCK_SCENARIOS = {
     ai_analysis_text:
       'The reconciliation analysis for Northbridge Retail has been completed with no discrepancies. The entity is consistent across CRM, ERP, and Finance. The contract amount of £150,000 follows a 40% / 40% / 20% installment schedule, and the first installment of £60,000 matches both the ERP invoice and the Finance payment. Overall this is a successful reconciliation with no anomalies — no action is required as the payment is on schedule.',
   },
+  'Greenfield Energy': {
+    status: 'normal',
+    system_data: {
+      crm: {
+        label: 'CRM',
+        field: 'contract_amount',
+        amount: 80000,
+        currency: 'GBP',
+      },
+      erp: {
+        label: 'ERP',
+        field: 'invoice_amount',
+        amount: 80000,
+        currency: 'GBP',
+      },
+      finance: {
+        label: 'Finance',
+        field: 'payment_amount',
+        amount: 80000,
+        currency: 'GBP',
+      },
+    },
+    discrepancies: [],
+    root_cause: {
+      probable_cause: 'Entity alias match (normal)',
+      evidence: [
+        'CRM entity name = Greenfield Energy Ltd',
+        'ERP entity name = Greenfield Energy',
+        'Finance entity name = Greenfield Energy Limited',
+        'Entity matching aligned Ltd / no suffix / Limited as the same entity',
+        'CRM contract, ERP invoice, and Finance payment all equal £80,000',
+      ],
+      recommended_action:
+        'No action required. Entity aliases are aligned and all key fields match.',
+    },
+    ai_analysis_text:
+      'The reconciliation analysis for Greenfield Energy has been completed with no discrepancies. CRM records the entity as Greenfield Energy Ltd, ERP records it as Greenfield Energy, and Finance records it as Greenfield Energy Limited. Entity matching aligns these naming variants to the same customer, and the CRM contract amount, ERP invoice amount, and Finance payment amount are all £80,000 GBP. This is a clean reconciliation with no anomaly.',
+  },
+  'Silverline Media': {
+    status: 'normal',
+    system_data: {
+      crm: {
+        label: 'CRM',
+        field: 'contract_amount',
+        amount: 50000,
+        currency: 'GBP',
+      },
+      erp: {
+        label: 'ERP',
+        field: 'invoice_amount',
+        amount: 50000,
+        currency: 'GBP',
+      },
+      finance: {
+        label: 'Finance',
+        field: 'payment_amount',
+        amount: 49850,
+        currency: 'GBP',
+      },
+    },
+    discrepancies: [],
+    root_cause: {
+      probable_cause: 'Bank fee adjustment (normal)',
+      evidence: [
+        'ERP invoice amount = £50,000',
+        'Finance payment amount = £49,850',
+        'Recorded bank fee = £150',
+        'Adjusted Finance amount = £49,850 + £150 = £50,000',
+      ],
+      recommended_action:
+        'No action required. The payment shortfall is fully explained by the recorded bank fee.',
+    },
+    ai_analysis_text:
+      'The reconciliation analysis for Silverline Media has been completed with no discrepancies. The ERP invoice amount is £50,000 GBP and the Finance payment amount is £49,850 GBP, with a recorded bank fee of £150 GBP. After applying the bank fee adjustment, the Finance amount reconciles to £50,000 GBP. The apparent difference is fully explained by the bank fee, so this is a clean reconciliation with no anomaly.',
+  },
+  'Atlas Software': {
+    status: 'normal',
+    system_data: {
+      crm: {
+        label: 'CRM',
+        field: 'contract_amount',
+        amount: 100000,
+        currency: 'USD',
+      },
+      erp: {
+        label: 'ERP',
+        field: 'invoice_amount',
+        amount: 100000,
+        currency: 'USD',
+      },
+      finance: {
+        label: 'Finance',
+        field: 'payment_amount',
+        amount: 79000,
+        currency: 'GBP',
+      },
+    },
+    discrepancies: [],
+    root_cause: {
+      probable_cause: 'Foreign exchange conversion (normal)',
+      evidence: [
+        'ERP invoice amount = USD 100,000',
+        'Recorded exchange rate = 0.79',
+        'Expected GBP value = USD 100,000 × 0.79 = GBP 79,000',
+        'Finance payment amount = GBP 79,000',
+      ],
+      recommended_action:
+        'No action required. The USD invoice and GBP payment reconcile at the recorded exchange rate.',
+    },
+    ai_analysis_text:
+      'The reconciliation analysis for Atlas Software has been completed with no discrepancies. ERP records an invoice amount of USD 100,000, while Finance records a payment amount of GBP 79,000. Using the recorded exchange rate of 0.79, USD 100,000 converts to GBP 79,000. This is a valid foreign exchange conversion and not a currency mismatch. The reconciliation is clean with no anomaly.',
+  },
+  'Harbor Logistics': {
+    status: 'anomaly',
+    system_data: {
+      crm: {
+        label: 'CRM',
+        field: 'contract_amount',
+        amount: 60000,
+        currency: 'GBP',
+      },
+      erp: {
+        label: 'ERP',
+        field: 'invoice_amount',
+        amount: 60000,
+        currency: 'GBP',
+      },
+      finance: {
+        label: 'Finance',
+        field: 'payment_amount',
+        amount: 60000,
+        currency: 'GBP',
+      },
+    },
+    discrepancies: [
+      {
+        field_pair: 'erp_invoice_id vs finance_invoice_id',
+        difference: 'INV-HBL-2026-Q1-001 vs INV-HBL-2026-Q1-999',
+        direction: 'invoice_id_mismatch',
+      },
+    ],
+    root_cause: {
+      probable_cause: 'High Risk anomaly: invoice linkage mismatch',
+      evidence: [
+        'ERP invoice_id = INV-HBL-2026-Q1-001',
+        'Finance invoice_id = INV-HBL-2026-Q1-999',
+        'CRM contract, ERP invoice, and Finance payment all equal £60,000',
+        'Amount match does not resolve the invoice ID mismatch',
+      ],
+      recommended_action:
+        'High risk. Verify whether the Finance payment was linked to the wrong ERP invoice before approving the reconciliation.',
+    },
+    ai_analysis_text:
+      'The reconciliation analysis for Harbor Logistics identified a High Risk anomaly. The CRM contract amount, ERP invoice amount, and Finance payment amount all match at £60,000 GBP, but the ERP invoice ID is INV-HBL-2026-Q1-001 while the Finance payment is linked to INV-HBL-2026-Q1-999. This invoice ID mismatch suggests the Finance payment may have been associated with the wrong ERP invoice. Recommended action: investigate the invoice-payment linkage and confirm the correct ERP invoice before closing the audit.',
+  },
 };
 
 const API_BASE = 'http://localhost:8000';
