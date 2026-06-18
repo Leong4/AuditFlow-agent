@@ -113,6 +113,8 @@ const MOCK_SCENARIOS = {
   },
 };
 
+const API_BASE = 'http://localhost:8000';
+
 function getScenario(entity) {
   return MOCK_SCENARIOS[entity] ?? MOCK_SCENARIOS['Northbridge Retail'];
 }
@@ -172,25 +174,38 @@ export const presetHistoryResults = [
   }),
 ];
 
-export async function runAudit(audits) {
-  // TODO: Replace this mock with POST /audit/run when the backend bridge is ready.
-  // status, system_data, discrepancies, and root_cause will come from
-  // deterministic ReconciliationOutput + RootCauseOutput structures.
-  // ai_analysis_text will come from the Root-Cause agent's natural-language
-  // Band room reply, and the frontend should display it without parsing it.
-  return Promise.resolve(
-    audits.map((audit, index) => {
-      const query = typeof audit === 'string' ? audit : audit.query;
-      const entity =
-        typeof audit === 'string' ? `Query ${index + 1}` : audit.entity;
-      const queryId =
-        typeof audit === 'string' ? `audit_mock_${index + 1}` : audit.queryId;
+async function readJson(response) {
+  const payload = await response.json().catch(() => ({}));
 
-      return createMockAuditResult({
-        entity,
-        query,
-        queryId,
-      });
-    }),
-  );
+  if (!response.ok) {
+    const message = payload.detail ?? `Request failed with status ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+export async function startAudit(queries) {
+  const response = await fetch(`${API_BASE}/api/queries`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ queries }),
+  });
+
+  return readJson(response);
+}
+
+export async function getAuditStatus(auditSessionId) {
+  const response = await fetch(`${API_BASE}/api/queries/${auditSessionId}`);
+  return readJson(response);
+}
+
+export async function getAuditResult(queryId) {
+  const response = await fetch(`${API_BASE}/api/queries/${queryId}/result`);
+  return readJson(response);
 }

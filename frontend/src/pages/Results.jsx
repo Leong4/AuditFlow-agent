@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { getAuditResult } from '../api/audit.js';
 import { useAuditHistory } from '../context/AuditHistoryContext.jsx';
 
 const STATUS_LABELS = {
@@ -160,9 +162,80 @@ export default function Results() {
   const location = useLocation();
   const navigate = useNavigate();
   const { addHistoryResults } = useAuditHistory();
-  const results = Array.isArray(location.state?.results)
-    ? location.state.results.slice(0, 3)
-    : [];
+  const historyResults = useMemo(
+    () =>
+      Array.isArray(location.state?.results)
+        ? location.state.results.slice(0, 3)
+        : [],
+    [location.state],
+  );
+  const querySummaries = useMemo(
+    () =>
+      Array.isArray(location.state?.queryStatuses)
+        ? location.state.queryStatuses.slice(0, 3)
+        : [],
+    [location.state],
+  );
+  const [results, setResults] = useState(historyResults);
+  const [resultError, setResultError] = useState('');
+  const [isLoadingResults, setIsLoadingResults] = useState(
+    historyResults.length === 0 && querySummaries.length > 0,
+  );
+
+  useEffect(() => {
+    if (historyResults.length > 0 || querySummaries.length === 0) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadResult = async (queryId) => {
+      let lastError = null;
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+          return await getAuditResult(queryId);
+        } catch (error) {
+          lastError = error;
+          if (error.status !== 425 || attempt === 3) {
+            throw error;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        }
+      }
+
+      throw lastError;
+    };
+
+    const loadResults = async () => {
+      setIsLoadingResults(true);
+      setResultError('');
+
+      try {
+        const loadedResults = await Promise.all(
+          querySummaries.map((query) => loadResult(query.query_id)),
+        );
+
+        if (!cancelled) {
+          setResults(loadedResults);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResultError(error.message || 'Audit results are still being prepared.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingResults(false);
+        }
+      }
+    };
+
+    loadResults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [historyResults.length, querySummaries]);
 
   const backToDashboard = () => {
     if (!location.state?.fromHistory && results.length > 0) {
@@ -189,7 +262,17 @@ export default function Results() {
         </button>
       </header>
 
-      {results.length === 0 ? (
+      {isLoadingResults ? (
+        <section className="empty-results">
+          <h2>Loading audit results...</h2>
+          <p>Collecting final Root-Cause replies from Band.</p>
+        </section>
+      ) : resultError ? (
+        <section className="empty-results">
+          <h2>Audit results are still being prepared</h2>
+          <p>{resultError}</p>
+        </section>
+      ) : results.length === 0 ? (
         <section className="empty-results">
           <h2>No audit results available</h2>
           <p>Run an audit from the dashboard to view reconciliation output.</p>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { runAudit } from '../api/audit.js';
+import { getAuditStatus } from '../api/audit.js';
 
 const AGENT_STATUS = {
   PENDING: 'pending',
@@ -64,33 +64,27 @@ const PROGRESS_LABELS = {
 // GET /api/queries/{query_id}/events or SSE.
 const SIMULATED_AGENT_EVENTS = [
   {
-    // Future event: Router has created a query_id and mentioned system agents.
     event: BACKEND_EVENT_NAMES.ROUTER_DISPATCHED,
     activeAgents: ['router'],
     doneAgents: ['router'],
-    durationMs: 1200,
+    durationMs: 800,
   },
   {
-    // Future events: crm_received, erp_received, and finance_received.
-    // The demo groups them because system agents query in parallel.
     event: BACKEND_EVENT_NAMES.SOURCE_AGENTS_RECEIVED,
     activeAgents: ['crm', 'erp', 'finance'],
     doneAgents: ['crm', 'erp', 'finance'],
-    durationMs: 1500,
+    durationMs: 900,
+    doneOffsetsMs: {
+      crm: 0,
+      erp: 180,
+      finance: 320,
+    },
   },
   {
-    // Future event: Reconciliation has produced ReconciliationOutput.
     event: BACKEND_EVENT_NAMES.RECONCILIATION_COMPLETED,
     activeAgents: ['reconciliation'],
     doneAgents: ['reconciliation'],
-    durationMs: 1200,
-  },
-  {
-    // Future event: Root-Cause has produced final explanation.
-    event: BACKEND_EVENT_NAMES.ROOTCAUSE_COMPLETED,
-    activeAgents: ['rootcause'],
-    doneAgents: ['rootcause'],
-    durationMs: 1200,
+    durationMs: 2600,
   },
 ];
 
@@ -100,11 +94,15 @@ function createInitialStatuses() {
   );
 }
 
-function createAuditId() {
-  const bytes = new Uint8Array(4);
-  crypto.getRandomValues(bytes);
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `audit_${hex}`;
+function createInitialStatusesByQuery(queryCount) {
+  return Array.from({ length: queryCount }, () => createInitialStatuses());
+}
+
+function updateStatusesForAllQueries(current, update) {
+  return current.map((statuses) => ({
+    ...statuses,
+    ...update,
+  }));
 }
 
 function extractEntityName(query) {
@@ -116,58 +114,139 @@ function extractEntityName(query) {
   return query;
 }
 
-function useSimulatedAgentFlow(onComplete) {
-  const [agentStatuses, setAgentStatuses] = useState(createInitialStatuses);
-  const [currentEvent, setCurrentEvent] = useState('audit_created');
+function useProcessingFlow({
+  auditSessionId,
+  onComplete,
+  onStatusUpdate,
+  queryCount,
+}) {
+  const [agentStatusesByQuery, setAgentStatusesByQuery] = useState(() =>
+    createInitialStatusesByQuery(queryCount),
+  );
+  const [currentEvents, setCurrentEvents] = useState(() =>
+    Array.from({ length: queryCount }, () => 'audit_created'),
+  );
+  const [waitingLonger, setWaitingLonger] = useState(false);
 
   useEffect(() => {
+    if (!auditSessionId) {
+      return undefined;
+    }
+
     const timers = [];
     let elapsedMs = 0;
+    let pollTimer = null;
+    let stopped = false;
+    let completionScheduled = false;
+    const startedAt = Date.now();
 
-    setAgentStatuses(createInitialStatuses());
-    setCurrentEvent('audit_created');
+    setAgentStatusesByQuery(createInitialStatusesByQuery(queryCount));
+    setCurrentEvents(Array.from({ length: queryCount }, () => 'audit_created'));
+    setWaitingLonger(false);
 
-    SIMULATED_AGENT_EVENTS.forEach((step, index) => {
-      const isFinalStep = index === SIMULATED_AGENT_EVENTS.length - 1;
-
+    SIMULATED_AGENT_EVENTS.forEach((step) => {
       timers.push(
         window.setTimeout(() => {
-          setCurrentEvent(step.event);
-          setAgentStatuses((current) => ({
-            ...current,
-            ...Object.fromEntries(
-              step.activeAgents.map((agent) => [agent, AGENT_STATUS.ACTIVE]),
+          setCurrentEvents(Array.from({ length: queryCount }, () => step.event));
+          setAgentStatusesByQuery((current) =>
+            updateStatusesForAllQueries(
+              current,
+              Object.fromEntries(
+                step.activeAgents.map((agent) => [agent, AGENT_STATUS.ACTIVE]),
+              ),
             ),
-          }));
+          );
         }, elapsedMs),
       );
 
       elapsedMs += step.durationMs;
 
-      timers.push(
-        window.setTimeout(() => {
-          setAgentStatuses((current) => ({
-            ...current,
-            ...Object.fromEntries(
-              step.doneAgents.map((agent) => [agent, AGENT_STATUS.DONE]),
-            ),
-          }));
-
-          if (isFinalStep) {
-            setCurrentEvent('completed');
-          }
-        }, elapsedMs),
-      );
+      step.doneAgents.forEach((agent) => {
+        timers.push(
+          window.setTimeout(() => {
+            setAgentStatusesByQuery((current) =>
+              updateStatusesForAllQueries(current, {
+                [agent]: AGENT_STATUS.DONE,
+              }),
+            );
+          }, elapsedMs + (step.doneOffsetsMs?.[agent] ?? 0)),
+        );
+      });
     });
 
-    timers.push(window.setTimeout(onComplete, elapsedMs + 800));
+    timers.push(
+      window.setTimeout(() => {
+        setCurrentEvents(
+          Array.from(
+            { length: queryCount },
+            () => BACKEND_EVENT_NAMES.ROOTCAUSE_COMPLETED,
+          ),
+        );
+        setAgentStatusesByQuery((current) =>
+          updateStatusesForAllQueries(current, {
+            rootcause: AGENT_STATUS.ACTIVE,
+          }),
+        );
+
+        const poll = async () => {
+          if (stopped) {
+            return;
+          }
+
+          try {
+            const status = await getAuditStatus(auditSessionId);
+            onStatusUpdate(status);
+
+            const allDone = status.queries.every((query) => query.status === 'done');
+            setAgentStatusesByQuery((current) =>
+              current.map((statuses, index) => ({
+                ...statuses,
+                rootcause:
+                  status.queries[index]?.status === 'done'
+                    ? AGENT_STATUS.DONE
+                    : AGENT_STATUS.ACTIVE,
+              })),
+            );
+            setCurrentEvents((current) =>
+              current.map((event, index) =>
+                status.queries[index]?.status === 'done'
+                  ? 'completed'
+                  : BACKEND_EVENT_NAMES.ROOTCAUSE_COMPLETED,
+              ),
+            );
+
+            if (allDone) {
+              if (!completionScheduled) {
+                completionScheduled = true;
+                window.setTimeout(() => onComplete(status), 7000);
+              }
+              return;
+            }
+          } catch (error) {
+            console.error('Audit status polling failed:', error);
+          }
+
+          if (Date.now() - startedAt > 60000) {
+            setWaitingLonger(true);
+          }
+
+          pollTimer = window.setTimeout(poll, 2500);
+        };
+
+        poll();
+      }, elapsedMs),
+    );
 
     return () => {
+      stopped = true;
       timers.forEach((timer) => window.clearTimeout(timer));
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+      }
     };
-  }, [onComplete]);
+  }, [auditSessionId, onComplete, onStatusUpdate, queryCount]);
 
-  return { agentStatuses, currentEvent };
+  return { agentStatusesByQuery, currentEvents, waitingLonger };
 }
 
 function AgentNode({ agentKey, status }) {
@@ -238,34 +317,50 @@ export default function Processing() {
   const navigate = useNavigate();
   const inputQueries = useMemo(
     () =>
-      Array.isArray(location.state?.queries)
-        ? location.state.queries.slice(0, 3)
+      Array.isArray(location.state?.inputQueries)
+        ? location.state.inputQueries.slice(0, 3)
         : ['Reconcile Acme Corp for Q1 2026'],
     [location.state],
   );
+  const auditSessionId = location.state?.auditSessionId;
+  const roomId = location.state?.roomId;
+  const [queryStatuses, setQueryStatuses] = useState([]);
 
   const audits = useMemo(
     () =>
-      inputQueries.map((query) => ({
+      inputQueries.map((query, index) => ({
         query,
         entity: extractEntityName(query),
-        queryId: createAuditId(),
+        queryId: queryStatuses[index]?.query_id ?? 'pending query_id',
       })),
-    [inputQueries],
+    [inputQueries, queryStatuses],
   );
 
-  const handleComplete = useCallback(async () => {
-    const results = await runAudit(audits);
+  const handleStatusUpdate = useCallback((status) => {
+    setQueryStatuses(status.queries);
+  }, []);
 
+  const handleComplete = useCallback((status) => {
     navigate('/results', {
       state: {
-        audits,
-        results,
+        auditSessionId,
+        audits: status.queries.map((query) => ({
+          query: query.query_text,
+          entity: extractEntityName(query.query_text),
+          queryId: query.query_id,
+        })),
+        queryStatuses: status.queries,
+        roomId,
       },
     });
-  }, [audits, navigate]);
+  }, [auditSessionId, navigate, roomId]);
 
-  const { agentStatuses, currentEvent } = useSimulatedAgentFlow(handleComplete);
+  const { agentStatusesByQuery, currentEvents, waitingLonger } = useProcessingFlow({
+    auditSessionId,
+    onComplete: handleComplete,
+    onStatusUpdate: handleStatusUpdate,
+    queryCount: audits.length,
+  });
 
   return (
     <main className="processing-page">
@@ -274,6 +369,11 @@ export default function Processing() {
           <p className="system-label">Band workflow in progress</p>
           <h1>Running audit...</h1>
           <p>Agents collaborating through Band</p>
+          {waitingLonger && (
+            <p className="processing-waiting">
+              Still waiting for Root-Cause final replies. This can take a little longer.
+            </p>
+          )}
         </div>
         <div className="status-summary" aria-label="Processing status">
           <span className="status-dot" aria-hidden="true" />
@@ -285,12 +385,12 @@ export default function Processing() {
         className={`processing-grid processing-grid-${audits.length}`}
         aria-label="Parallel audit windows"
       >
-        {audits.map((audit) => (
+        {audits.map((audit, index) => (
           <QueryColumn
             audit={audit}
-            agentStatuses={agentStatuses}
-            currentEvent={currentEvent}
-            key={audit.queryId}
+            agentStatuses={agentStatusesByQuery[index] ?? createInitialStatuses()}
+            currentEvent={currentEvents[index] ?? 'audit_created'}
+            key={audit.query}
           />
         ))}
       </section>

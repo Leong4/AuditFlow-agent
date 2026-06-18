@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ContextMenu from '../components/ContextMenu.jsx';
 import Sidebar from '../components/Sidebar.jsx';
+import { startAudit } from '../api/audit.js';
 import { useAuditHistory } from '../context/AuditHistoryContext.jsx';
 import { availableCompanies } from '../data/companies.js';
 
@@ -69,6 +70,8 @@ export default function Dashboard() {
   const [queries, setQueries] = useState(() => [createQuery()]);
   const [activeQueryId, setActiveQueryId] = useState(() => queries[0].id);
   const [contextMenu, setContextMenu] = useState(null);
+  const [runError, setRunError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const addQuery = () => {
     const nextQuery = createQuery();
@@ -99,7 +102,7 @@ export default function Dashboard() {
     );
   };
 
-  const runAudit = () => {
+  const runAudit = async () => {
     const nonEmptyQueries = queries
       .map((query) => query.value.trim())
       .filter(Boolean);
@@ -110,11 +113,24 @@ export default function Dashboard() {
       return;
     }
 
-    navigate('/processing', {
-      state: {
-        queries: nonEmptyQueries,
-      },
-    });
+    setIsSubmitting(true);
+    setRunError('');
+
+    try {
+      const auditSession = await startAudit(nonEmptyQueries);
+
+      navigate('/processing', {
+        state: {
+          auditSessionId: auditSession.audit_session_id,
+          inputQueries: nonEmptyQueries,
+          roomId: auditSession.room_id,
+        },
+      });
+    } catch (error) {
+      setRunError(error.message || 'Unable to start audit. Check that the backend is running.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const fillCompanyQuery = (company) => {
@@ -233,14 +249,20 @@ export default function Dashboard() {
                 className="secondary-action"
                 type="button"
                 onClick={addQuery}
-                disabled={!canAddQuery}
+                disabled={!canAddQuery || isSubmitting}
               >
                 + Add parallel query
               </button>
-              <button className="primary-action" type="button" onClick={runAudit}>
-                Run Audit
+              <button
+                className="primary-action"
+                type="button"
+                onClick={runAudit}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Starting...' : 'Run Audit'}
               </button>
             </div>
+            {runError && <p className="query-error">{runError}</p>}
           </section>
 
           <ArchivedAudits

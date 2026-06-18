@@ -544,6 +544,14 @@ button:disabled {
   margin-top: 22px;
 }
 
+.query-error,
+.processing-waiting {
+  margin: 14px 0 0;
+  color: #ffd186;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .secondary-action,
 .primary-action {
   min-height: 48px;
